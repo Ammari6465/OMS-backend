@@ -30,6 +30,16 @@ data class CurrentUserResponse(
     val staffId: Long?
 )
 
+data class UpdateProfileRequest(
+    @field:NotBlank(message = "Full name is required")
+    @field:Size(max = 200)
+    val fullName: String,
+
+    @field:NotBlank(message = "Email is required")
+    @field:Email(message = "A valid email is required")
+    val email: String
+)
+
 data class ChangePasswordRequest(
     @field:NotBlank(message = "Current password is required")
     val currentPassword: String,

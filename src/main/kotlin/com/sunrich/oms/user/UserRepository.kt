@@ -12,6 +12,10 @@ interface UserRepository : JpaRepository<User, Long>, JpaSpecificationExecutor<U
 
     fun findByEmailIgnoreCaseAndIsDeletedFalse(email: String): Optional<User>
 
+    fun findByUsernameIgnoreCase(username: String): Optional<User>
+
+    fun findByEmailIgnoreCase(email: String): Optional<User>
+
     fun findByPasswordResetTokenAndIsDeletedFalse(token: String): Optional<User>
 
     fun existsByUsernameIgnoreCaseAndIsDeletedFalse(username: String): Boolean

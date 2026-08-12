@@ -72,6 +72,21 @@ class AuthService(
     }
 
     @Transactional
+    fun updateProfile(request: UpdateProfileRequest): CurrentUserResponse {
+        val principal = SecurityUtils.currentPrincipal()
+        val user = userRepository.findById(principal.userId)
+            .filter { !it.isDeleted }
+            .orElseThrow { UnauthorizedException("Session user no longer exists") }
+        val duplicate = userRepository.findByEmailIgnoreCaseAndIsDeletedFalse(request.email).orElse(null)
+        if (duplicate != null && duplicate.id != user.id) {
+            throw BadRequestException("That email address is already in use")
+        }
+        user.fullName = request.fullName.trim()
+        user.email = request.email.trim()
+        return userRepository.save(user).toCurrentUserResponse()
+    }
+
+    @Transactional
     fun changePassword(request: ChangePasswordRequest) {
         val principal = SecurityUtils.currentPrincipal()
         val user = userRepository.findById(principal.userId)
