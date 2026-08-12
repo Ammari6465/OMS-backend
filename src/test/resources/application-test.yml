@@ -1,0 +1,34 @@
+# Test profile — runs the Spring context against in-memory H2 (no MySQL needed).
+spring:
+  datasource:
+    url: jdbc:h2:mem:oms;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  sql:
+    init:
+      mode: never          # do NOT run the MySQL-specific schema.sql on H2
+
+# Deterministic security config for the auth tests
+oms:
+  security:
+    jwt:
+      secret: test-secret-key-that-is-at-least-32-bytes-long!!
+      expiration-ms: 86400000
+    login:
+      max-failed-attempts: 5
+      lock-duration-minutes: 30
+    password-reset:
+      token-ttl-minutes: 30
+  bootstrap:
+    super-admin:
+      username: superadmin
+      email: superadmin@sunrichgroup.com
+      password: Admin@12345
+      full-name: System Administrator

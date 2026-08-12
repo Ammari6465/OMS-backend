@@ -1,0 +1,97 @@
+spring:
+  application:
+    name: oms-backend
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/oms?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8}
+    username: ${DB_USERNAME:oms}
+    password: ${DB_PASSWORD:oms}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:20}
+      minimum-idle: 5
+      connection-timeout: 30000
+      pool-name: oms-hikari
+
+  jpa:
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+        jdbc:
+          batch_size: 50
+          time_zone: UTC
+        order_inserts: true
+        order_updates: true
+    show-sql: ${JPA_SHOW_SQL:false}
+
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /api
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/plain
+  error:
+    include-message: always
+    include-binding-errors: always
+
+# ------------------------------------------------------------------
+# OMS application configuration
+# ------------------------------------------------------------------
+oms:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:oms-change-this-secret-in-production-min-32-bytes-long-please}
+      expiration-ms: ${JWT_EXPIRATION_MS:86400000}       # 24 hours
+    login:
+      max-failed-attempts: 5
+      lock-duration-minutes: 30
+    rate-limit:
+      max-requests-per-minute: 300
+    password-reset:
+      token-ttl-minutes: 30
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
+  bootstrap:
+    # Default super admin created on first startup if no users exist
+    super-admin:
+      username: ${SUPER_ADMIN_USERNAME:superadmin}
+      email: ${SUPER_ADMIN_EMAIL:superadmin@sunrichgroup.com}
+      password: ${SUPER_ADMIN_PASSWORD:Admin@12345}
+      full-name: ${SUPER_ADMIN_NAME:System Administrator}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+
+logging:
+  level:
+    root: INFO
+    com.sunrich.oms: ${LOG_LEVEL:INFO}
