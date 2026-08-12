@@ -47,7 +47,8 @@ spring:
             enable: true
 
 server:
-  port: ${SERVER_PORT:8080}
+  # Railway provides PORT; SERVER_PORT remains available for other hosts/local use.
+  port: ${SERVER_PORT:${PORT:8080}}
   servlet:
     context-path: /api
   compression:
