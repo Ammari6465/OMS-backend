@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.ApplicationRunner
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.core.annotation.Order
 import org.springframework.security.crypto.password.PasswordEncoder
 
 /**
@@ -26,6 +27,7 @@ class DataInitializer(
     private val log = LoggerFactory.getLogger(javaClass)
 
     @Bean
+    @Order(0)
     fun seedSuperAdmin(userRepository: UserRepository, passwordEncoder: PasswordEncoder): ApplicationRunner =
         ApplicationRunner {
             if (userRepository.existsByUsernameIgnoreCaseAndIsDeletedFalse(username)) return@ApplicationRunner

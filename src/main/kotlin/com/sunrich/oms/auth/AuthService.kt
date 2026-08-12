@@ -4,6 +4,7 @@ import com.sunrich.oms.common.enums.EntityStatus
 import com.sunrich.oms.exception.AccountLockedException
 import com.sunrich.oms.exception.BadRequestException
 import com.sunrich.oms.exception.UnauthorizedException
+import com.sunrich.oms.integration.email.NotificationEmailService
 import com.sunrich.oms.security.JwtService
 import com.sunrich.oms.security.SecurityUtils
 import com.sunrich.oms.user.User
@@ -22,8 +23,10 @@ class AuthService(
     private val passwordEncoder: PasswordEncoder,
     private val jwtService: JwtService,
     private val loginAttemptService: LoginAttemptService,
+    private val notificationEmailService: NotificationEmailService,
     @Value("\${oms.security.jwt.expiration-ms}") private val jwtExpirationMs: Long,
-    @Value("\${oms.security.password-reset.token-ttl-minutes}") private val resetTokenTtlMinutes: Long
+    @Value("\${oms.security.password-reset.token-ttl-minutes}") private val resetTokenTtlMinutes: Long,
+    @Value("\${oms.frontend.base-url}") private val frontendBaseUrl: String
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -102,8 +105,7 @@ class AuthService(
     /**
      * Self-service reset request. Always returns quietly to avoid user
      * enumeration. When a matching active account exists a one-time token is
-     * generated; the delivery email is dispatched by the notification module
-     * (Phase 4). The reset link is logged for operability until then.
+     * generated and delivered through the configured Gmail API service.
      */
     @Transactional
     fun requestPasswordReset(request: ForgotPasswordRequest) {
@@ -116,7 +118,10 @@ class AuthService(
         user.passwordResetToken = token
         user.passwordResetExpires = LocalDateTime.now().plusMinutes(resetTokenTtlMinutes)
         userRepository.save(user)
-        log.info("Password reset token issued for {} (expires in {} min): {}", user.email, resetTokenTtlMinutes, token)
+        notificationEmailService.sendPasswordReset(
+            user.email,
+            "${frontendBaseUrl.trimEnd('/')}/auth/reset-password?token=$token"
+        )
     }
 
     @Transactional

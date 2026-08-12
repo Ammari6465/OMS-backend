@@ -3,6 +3,8 @@ package com.sunrich.oms.user
 import com.sunrich.oms.common.entity.BaseEntity
 import com.sunrich.oms.common.enums.EntityStatus
 import com.sunrich.oms.common.enums.Role
+import com.sunrich.oms.organization.Company
+import com.sunrich.oms.organization.Staff
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -10,6 +12,10 @@ import jakarta.persistence.Enumerated
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
+import jakarta.persistence.FetchType
+import jakarta.persistence.ForeignKey
+import jakarta.persistence.JoinColumn
+import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 import java.time.LocalDateTime
 
@@ -70,6 +76,25 @@ class User(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "user_id")
     var id: Long? = null
+
+    /** Read-only associations make the existing scalar API fields real FK columns. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(
+        name = "company_id",
+        insertable = false,
+        updatable = false,
+        foreignKey = ForeignKey(name = "fk_users_company")
+    )
+    var company: Company? = null
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(
+        name = "staff_id",
+        insertable = false,
+        updatable = false,
+        foreignKey = ForeignKey(name = "fk_users_staff")
+    )
+    var staff: Staff? = null
 
     val isLocked: Boolean
         get() = lockedUntil?.isAfter(LocalDateTime.now()) == true

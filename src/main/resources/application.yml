@@ -34,18 +34,6 @@ spring:
     serialization:
       write-dates-as-timestamps: false
 
-  mail:
-    host: ${MAIL_HOST:smtp.gmail.com}
-    port: ${MAIL_PORT:587}
-    username: ${MAIL_USERNAME:}
-    password: ${MAIL_PASSWORD:}
-    properties:
-      mail:
-        smtp:
-          auth: true
-          starttls:
-            enable: true
-
 server:
   # Railway provides PORT; SERVER_PORT remains available for other hosts/local use.
   port: ${SERVER_PORT:${PORT:8080}}
@@ -82,6 +70,19 @@ oms:
       email: ${SUPER_ADMIN_EMAIL:superadmin@sunrichgroup.com}
       password: ${SUPER_ADMIN_PASSWORD:Admin@12345}
       full-name: ${SUPER_ADMIN_NAME:System Administrator}
+  frontend:
+    base-url: ${FRONTEND_BASE_URL:http://localhost:4200}
+  gmail:
+    enabled: ${GMAIL_ENABLED:false}
+    service-account-json: ${GMAIL_SERVICE_ACCOUNT_JSON:}
+    sender: ${GMAIL_SENDER:}
+  ftp:
+    enabled: ${FTP_ENABLED:false}
+    host: ${FTP_HOST:localhost}
+    port: ${FTP_PORT:21}
+    username: ${FTP_USERNAME:}
+    password: ${FTP_PASSWORD:}
+    base-directory: ${FTP_BASE_DIRECTORY:/oms}
 
 management:
   endpoints:

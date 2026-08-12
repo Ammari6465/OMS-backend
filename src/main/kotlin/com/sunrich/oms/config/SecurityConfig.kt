@@ -64,6 +64,7 @@ class SecurityConfig(
                         "/ws/**",
                         "/sse/**",
                         "/actuator/health",
+                        "/actuator/health/**",
                         "/actuator/info",
                         "/h2-console/**"
                     ).permitAll()

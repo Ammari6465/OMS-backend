@@ -21,7 +21,6 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-websocket")
-    implementation("org.springframework.boot:spring-boot-starter-mail")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
 
     // Kotlin
@@ -36,6 +35,8 @@ dependencies {
 
     // Integrations used in later phases (FTP, CSV, PDF export)
     implementation("commons-net:commons-net:3.10.0")
+    implementation("com.google.auth:google-auth-library-oauth2-http:1.43.0")
+    implementation("org.eclipse.angus:jakarta.mail")
     implementation("com.opencsv:opencsv:5.9")
     implementation("com.github.librepdf:openpdf:1.3.35")
 
@@ -45,7 +46,7 @@ dependencies {
     // Tests
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
-    runtimeOnly("com.h2database:h2")
+    testRuntimeOnly("com.h2database:h2")
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {

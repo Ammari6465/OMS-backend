@@ -60,6 +60,8 @@ enum class AuditAction {
 enum class NotificationType {
     STAFF_ONBOARDED,
     STAFF_EXITED,
+    COMPANY_ADDED,
+    DEPARTMENT_CHANGE,
     PROMOTION,
     TITLE_CHANGE,
     DEPARTMENT_TRANSFER,
