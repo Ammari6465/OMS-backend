@@ -2,7 +2,8 @@ spring:
   application:
     name: oms-backend
   profiles:
-    active: ${SPRING_PROFILES_ACTIVE:dev}
+    # Production-safe default. Local development also uses MySQL per the SRS.
+    active: ${SPRING_PROFILES_ACTIVE:prod}
 
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/oms?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8}
@@ -66,10 +67,10 @@ oms:
   bootstrap:
     # Default super admin created on first startup if no users exist
     super-admin:
-      username: ${SUPER_ADMIN_USERNAME:superadmin}
-      email: ${SUPER_ADMIN_EMAIL:superadmin@sunrichgroup.com}
+      username: ${SUPER_ADMIN_USERNAME:admin_sunrich}
+      email: ${SUPER_ADMIN_EMAIL:admin@sunrichgroup.com}
       password: ${SUPER_ADMIN_PASSWORD:Admin@12345}
-      full-name: ${SUPER_ADMIN_NAME:System Administrator}
+      full-name: ${SUPER_ADMIN_NAME:Sunrich Administrator}
   frontend:
     base-url: ${FRONTEND_BASE_URL:http://localhost:4200}
   gmail:
