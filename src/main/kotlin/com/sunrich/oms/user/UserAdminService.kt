@@ -17,8 +17,7 @@ import com.sunrich.oms.organization.StaffRepository
 import com.sunrich.oms.security.SecurityUtils
 import com.sunrich.oms.systemdata.AuditLog
 import com.sunrich.oms.systemdata.AuditLogRepository
-import com.sunrich.oms.systemdata.Notification
-import com.sunrich.oms.systemdata.NotificationRepository
+import com.sunrich.oms.systemdata.NotificationDeliveryService
 import jakarta.persistence.criteria.JoinType
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.domain.PageRequest
@@ -37,7 +36,7 @@ class UserAdminService(
     private val staff: StaffRepository,
     private val passwordEncoder: PasswordEncoder,
     private val audits: AuditLogRepository,
-    private val notifications: NotificationRepository,
+    private val notifications: NotificationDeliveryService,
     private val email: NotificationEmailService,
     @Value("\${oms.security.password-reset.token-ttl-minutes}") private val resetTokenTtlMinutes: Long,
     @Value("\${oms.frontend.base-url}") private val frontendBaseUrl: String
@@ -363,7 +362,7 @@ class UserAdminService(
     }
 
     private fun notify(target: User, title: String, message: String) {
-        notifications.save(Notification(target, NotificationType.SYSTEM, "$title: $message"))
+        notifications.deliver(target, NotificationType.SYSTEM, "$title: $message", "/users/${target.id}", "User", target.id)
     }
 
     private fun response(user: User): UserAdminResponse {

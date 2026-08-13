@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -53,13 +54,20 @@ class AuditLogController(private val service: SystemDataService) {
 
 @RestController
 @RequestMapping(value = ["/notifications", "/records/notifications"])
-class NotificationController(private val service: SystemDataService) {
-    @GetMapping fun list(@RequestParam(defaultValue = "false") includeDeleted: Boolean) =
-        ApiResponse.ok(service.listNotifications())
-    @PostMapping fun create(@RequestBody request: NotificationRequest) =
-        ApiResponse.ok(service.createNotification(request), "Notification created")
-    @PutMapping("/{id}") fun update(@PathVariable id: Long, @RequestBody request: NotificationRequest) =
+class NotificationController(private val service: SystemDataService, private val realtime: NotificationRealtimePublisher) {
+    @GetMapping fun list(@RequestParam(defaultValue = "0") page: Int, @RequestParam(defaultValue = "20") size: Int,
+        @RequestParam(required = false) search: String?, @RequestParam(required = false) type: com.sunrich.oms.common.enums.NotificationType?,
+        @RequestParam(required = false) category: String?, @RequestParam(required = false) priority: String?,
+        @RequestParam(required = false) read: Boolean?,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) from: java.time.LocalDateTime?,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) to: java.time.LocalDateTime?) =
+        ApiResponse.ok(service.listNotifications(page,size,search,type,category,priority,read,from,to))
+    @GetMapping("/summary") fun summary() = ApiResponse.ok(service.notificationSummary())
+    @GetMapping("/stream", produces = [MediaType.TEXT_EVENT_STREAM_VALUE]) fun stream() = realtime.subscribe(com.sunrich.oms.security.SecurityUtils.currentUserId())
+    @GetMapping("/{id}") fun get(@PathVariable id: Long) = ApiResponse.ok(service.getNotification(id))
+    @PatchMapping("/{id}/read") fun update(@PathVariable id: Long, @RequestBody request: NotificationRequest) =
         ApiResponse.ok(service.updateNotification(id, request), "Notification updated")
+    @PatchMapping("/read-all") fun markAllRead() = ApiResponse.ok(service.markAllNotificationsRead(), "All notifications marked read")
     @DeleteMapping("/{id}") fun delete(@PathVariable id: Long): ApiResponse<Unit> {
         service.deleteNotification(id); return ApiResponse.ok("Notification removed")
     }

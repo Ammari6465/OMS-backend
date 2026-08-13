@@ -45,14 +45,16 @@ data class AuditSummaryResponse(
 )
 
 data class NotificationRequest(
-    val type: NotificationType? = null, val title: String? = null, val message: String? = null,
-    val icon: String? = null, val color: String? = null, val isRead: Boolean? = null
+    val isRead: Boolean? = null
 )
 data class NotificationResponse(
     val id: Long, val type: NotificationType, val title: String, val message: String,
-    val icon: String, val color: String, val isRead: Boolean, val isDeleted: Boolean = false,
+    val icon: String, val color: String, val category: String, val priority: String,
+    val link: String?, val entityType: String?, val entityId: Long?,
+    val isRead: Boolean, val readAt: LocalDateTime?, val isDeleted: Boolean = false,
     val createdAt: LocalDateTime?, val updatedAt: LocalDateTime?
 )
+data class NotificationSummaryResponse(val total: Long, val unread: Long, val today: Long)
 data class SettingRequest(val kind: String? = null, val values: Map<String, Boolean> = emptyMap())
 data class SettingResponse(
     val id: Long, val kind: String, val values: Map<String, Boolean>, val isDeleted: Boolean,

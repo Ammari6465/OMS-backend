@@ -10,7 +10,10 @@ interface AuditLogRepository : Repository<AuditLog, Long>, JpaSpecificationExecu
     fun findAll(): List<AuditLog>
     fun count(): Long
 }
-interface NotificationRepository : JpaRepository<Notification, Long>
+interface NotificationRepository : JpaRepository<Notification, Long>, JpaSpecificationExecutor<Notification> {
+    fun findByIdAndRecipientId(id: Long, recipientId: Long): Notification?
+    fun findFirstByRecipientIdAndTypeAndMessageOrderByCreatedAtDesc(recipientId: Long, type: com.sunrich.oms.common.enums.NotificationType, message: String): Notification?
+}
 interface SystemSettingRepository : JpaRepository<SystemSetting, Long> {
     fun findByKind(kind: String): SystemSetting?
 }

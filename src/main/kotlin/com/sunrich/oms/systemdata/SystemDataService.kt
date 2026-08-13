@@ -121,17 +121,54 @@ class SystemDataService(
     }
 
     @Transactional(readOnly = true)
-    fun listNotifications(): List<NotificationResponse> {
-        val userId = SecurityUtils.currentUserId()
-        return notifications.findAll().filter { it.recipient.id == userId }.sortedByDescending { it.createdAt }.map(::notificationResponse)
+    fun listNotifications(page: Int, size: Int, search: String?, type: NotificationType?, category: String?, priority: String?,
+        read: Boolean?, from: LocalDateTime?, to: LocalDateTime?): PageResponse<NotificationResponse> {
+        if (from != null && to != null && to.isBefore(from)) throw BadRequestException("Notification end time cannot be before start time")
+        val specification = notificationSpecification(SecurityUtils.currentUserId(), search, type, category, priority, read, from, to)
+        val pageable = PageRequest.of(page.coerceAtLeast(0), size.coerceIn(1, 100), Sort.by(Sort.Direction.DESC, "createdAt"))
+        return PageResponse.from(notifications.findAll(specification, pageable), ::notificationResponse)
     }
-    @Transactional fun createNotification(request: NotificationRequest) = notificationResponse(notifications.save(
-        Notification(currentUser(), request.type ?: NotificationType.SYSTEM, requiredText(request.message, "Notification message"), request.isRead ?: false)))
+    @Transactional(readOnly = true) fun getNotification(id: Long) = notificationResponse(ownedNotification(id))
+    @Transactional(readOnly = true) fun notificationSummary(): NotificationSummaryResponse {
+        val userId = SecurityUtils.currentUserId(); val base = notificationSpecification(userId, null, null, null, null, null, null, null)
+        val unread = base.and { root, _, cb -> cb.isFalse(root.get("isRead")) }
+        val today = base.and { root, _, cb -> cb.greaterThanOrEqualTo(root.get("createdAt"), LocalDate.now().atStartOfDay()) }
+        return NotificationSummaryResponse(notifications.count(base), notifications.count(unread), notifications.count(today))
+    }
     @Transactional fun updateNotification(id: Long, request: NotificationRequest): NotificationResponse {
-        val entity = ownedNotification(id); request.type?.let { entity.type = it }; request.message?.let { entity.message = requiredText(it, "Notification message") }; request.isRead?.let { entity.isRead = it }
+        val entity = ownedNotification(id); val read = request.isRead ?: throw BadRequestException("isRead is required")
+        entity.isRead = read; entity.readAt = if (read) LocalDateTime.now() else null
         return notificationResponse(notifications.save(entity))
     }
+    @Transactional fun markAllNotificationsRead(): NotificationSummaryResponse {
+        notifications.findAll(notificationSpecification(SecurityUtils.currentUserId(), null, null, null, null, false, null, null)).forEach {
+            it.isRead = true; it.readAt = LocalDateTime.now()
+        }
+        return notificationSummary()
+    }
     @Transactional fun deleteNotification(id: Long) = notifications.delete(ownedNotification(id))
+
+    private fun notificationSpecification(userId: Long, search: String?, type: NotificationType?, category: String?, priority: String?,
+        read: Boolean?, from: LocalDateTime?, to: LocalDateTime?) = Specification<Notification> { root, _, cb ->
+        val predicates = mutableListOf<jakarta.persistence.criteria.Predicate>(cb.equal(root.get<User>("recipient").get<Long>("id"), userId))
+        type?.let { predicates += cb.equal(root.get<NotificationType>("type"), it) }
+        read?.let { predicates += cb.equal(root.get<Boolean>("isRead"), it) }
+        from?.let { predicates += cb.greaterThanOrEqualTo(root.get("createdAt"), it) }
+        to?.let { predicates += cb.lessThan(root.get("createdAt"), it) }
+        search?.trim()?.lowercase()?.takeIf(String::isNotEmpty)?.let {
+            val pattern = "%${escapeLike(it)}%"
+            predicates += cb.or(cb.like(cb.lower(root.get("message")), pattern, '\\'), cb.like(cb.lower(root.get<NotificationType>("type").`as`(String::class.java)), pattern, '\\'))
+        }
+        category?.uppercase()?.takeIf { it != "ALL" }?.let { wanted ->
+            val types = NotificationType.entries.filter { notificationMeta(it).category == wanted }
+            predicates += if (types.isEmpty()) cb.disjunction() else root.get<NotificationType>("type").`in`(types)
+        }
+        priority?.uppercase()?.takeIf { it != "ALL" }?.let { wanted ->
+            val types = NotificationType.entries.filter { notificationMeta(it).priority == wanted }
+            predicates += if (types.isEmpty()) cb.disjunction() else root.get<NotificationType>("type").`in`(types)
+        }
+        cb.and(*predicates.toTypedArray())
+    }
 
     @Transactional(readOnly = true) fun listSettings(includeDeleted: Boolean) = settings.findAll().filter { includeDeleted || !it.isDeleted }.map(::settingResponse)
     @Transactional fun createSetting(request: SettingRequest): SettingResponse {
@@ -150,7 +187,8 @@ class SystemDataService(
     private fun scopedCompanyId(requested: Long?): Long? { val principal = SecurityUtils.currentPrincipal(); if (principal.isSuperAdmin) return requested
         val own = principal.companyId ?: throw ForbiddenException("Your account is not assigned to a company"); if (requested != null && requested != own) throw ForbiddenException("You cannot access audit events from another company"); return own }
     private fun currentUser() = users.findById(SecurityUtils.currentUserId()).orElseThrow { ResourceNotFoundException("Authenticated user", SecurityUtils.currentUserId()) }
-    private fun ownedNotification(id: Long): Notification { val e=notifications.findById(id).orElseThrow{ResourceNotFoundException("Notification",id)};if(e.recipient.id!=SecurityUtils.currentUserId())throw ResourceNotFoundException("Notification",id);return e }
+    private fun ownedNotification(id: Long): Notification = notifications.findByIdAndRecipientId(id, SecurityUtils.currentUserId())
+        ?: throw ResourceNotFoundException("Notification",id)
     private fun setting(id: Long)=settings.findById(id).orElseThrow{ResourceNotFoundException("Setting",id)}
     private fun auditResponse(e: AuditLog): AuditResponse {
         val entityType = e.entityType.ifBlank { e.fieldName.substringBefore(" #") }
@@ -177,7 +215,10 @@ class SystemDataService(
         safe=safe.replace(Regex("(?i)Bearer\\s+[A-Za-z0-9._~-]+"), "Bearer [REDACTED]"); return safe.take(10_000) }
     private fun applyValues(e:SystemSetting,v:Map<String,Boolean>):SystemSetting{if(e.kind=="notification-preferences"){v["onboarding"]?.let{e.onboarding=it};v["exits"]?.let{e.exits=it};v["transfers"]?.let{e.transfers=it};v["vacancies"]?.let{e.vacancies=it}}else{v["SUPER_ADMIN"]?.let{e.superAdmin=it};v["COMPANY_ADMIN"]?.let{e.companyAdmin=it};v["MANAGER"]?.let{e.manager=it};v["STAFF"]?.let{e.staff=it};v["READ_ONLY"]?.let{e.readOnly=it}};return e}
     private fun validateKind(k:String?):String{val v=k?.trim()?:throw BadRequestException("kind is required");if(v !in setOf("notification-preferences","password-reset-roles"))throw BadRequestException("Unsupported setting kind: $v");return v}
-    private fun notificationResponse(e:Notification):NotificationResponse{val d=notificationDisplay(e.type);return NotificationResponse(e.id!!,e.type,d.first,e.message,d.second,d.third,e.isRead,false,e.createdAt,e.createdAt)}
+    private fun notificationResponse(e:Notification):NotificationResponse{val d=notificationDisplay(e.type);val m=notificationMeta(e.type);return NotificationResponse(e.id!!,e.type,d.first,e.message,d.second,d.third,m.category,m.priority,e.link,e.entityType,e.entityId,e.isRead,e.readAt,false,e.createdAt,e.createdAt)}
+    fun toNotificationResponse(entity: Notification): NotificationResponse = notificationResponse(entity)
+    private data class NotificationMeta(val category:String,val priority:String)
+    private fun notificationMeta(t:NotificationType)=when(t){NotificationType.STAFF_EXITED,NotificationType.VACANCY_CLOSED->NotificationMeta("WORKFORCE","HIGH");NotificationType.SYSTEM->NotificationMeta("SYSTEM","NORMAL");NotificationType.VACANCY_OPENED->NotificationMeta("VACANCY","NORMAL");NotificationType.COMPANY_ADDED->NotificationMeta("ORGANIZATION","NORMAL");NotificationType.STAFF_ONBOARDED->NotificationMeta("WORKFORCE","NORMAL");else->NotificationMeta("ORGANIZATION","NORMAL")}
     private fun notificationDisplay(t:NotificationType)=when(t){NotificationType.STAFF_ONBOARDED->Triple("New staff onboarded","pi pi-user-plus","#34d399");NotificationType.STAFF_EXITED->Triple("Staff exited","pi pi-sign-out","#f87171");NotificationType.COMPANY_ADDED->Triple("Company registered","pi pi-building","#0f8bfd");NotificationType.VACANCY_OPENED->Triple("Vacancy opened","pi pi-inbox","#fbbf24");NotificationType.VACANCY_CLOSED->Triple("Vacancy closed","pi pi-check-circle","#34d399");NotificationType.DEPARTMENT_TRANSFER,NotificationType.DEPARTMENT_CHANGE->Triple("Department changed","pi pi-sitemap","#8b5cf6");NotificationType.COMPANY_TRANSFER->Triple("Company transfer","pi pi-building","#8b5cf6");NotificationType.PROMOTION,NotificationType.TITLE_CHANGE->Triple("Staff updated","pi pi-star","#fbbf24");NotificationType.REPORTING_LINE_CHANGE->Triple("Reporting line changed","pi pi-share-alt","#8b5cf6");NotificationType.SYSTEM->Triple("System notification","pi pi-bell","#0f8bfd")}
     private fun settingResponse(e:SystemSetting)=SettingResponse(e.id!!,e.kind,if(e.kind=="notification-preferences")mapOf("onboarding" to(e.onboarding?:true),"exits" to(e.exits?:true),"transfers" to(e.transfers?:true),"vacancies" to(e.vacancies?:false))else mapOf("SUPER_ADMIN" to(e.superAdmin?:true),"COMPANY_ADMIN" to(e.companyAdmin?:true),"MANAGER" to(e.manager?:false),"STAFF" to(e.staff?:false),"READ_ONLY" to(e.readOnly?:false)),e.isDeleted,e.createdAt,e.updatedAt)
     private fun requiredText(v:String?,f:String)=v?.trim()?.takeIf{it.isNotEmpty()}?:throw BadRequestException("$f is required")

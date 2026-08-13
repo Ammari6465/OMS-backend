@@ -13,8 +13,7 @@ import com.sunrich.oms.realtime.OrganogramUpdatePublisher
 import com.sunrich.oms.security.SecurityUtils
 import com.sunrich.oms.systemdata.AuditLog
 import com.sunrich.oms.systemdata.AuditLogRepository
-import com.sunrich.oms.systemdata.Notification
-import com.sunrich.oms.systemdata.NotificationRepository
+import com.sunrich.oms.systemdata.NotificationDeliveryService
 import com.sunrich.oms.user.UserRepository
 import jakarta.persistence.criteria.JoinType
 import org.springframework.data.domain.PageRequest
@@ -31,7 +30,7 @@ class PositionService(
     private val staff: StaffRepository,
     private val users: UserRepository,
     private val audits: AuditLogRepository,
-    private val notifications: NotificationRepository,
+    private val notifications: NotificationDeliveryService,
     private val updates: OrganogramUpdatePublisher
 ) {
     @Transactional(readOnly = true)
@@ -326,7 +325,7 @@ class PositionService(
     private fun notifyActor(type: NotificationType, message: String) {
         val principal = SecurityUtils.currentPrincipalOrNull() ?: return
         val actor = users.findById(principal.userId).orElse(null) ?: return
-        notifications.save(Notification(recipient = actor, type = type, message = message))
+        notifications.deliver(actor, type, message, "/positions", "Position")
     }
 
     private fun auditValue(entity: Position) =

@@ -98,8 +98,23 @@ class Notification(
     @Column(nullable = false, length = 1000)
     var message: String,
 
+    @Column(length = 500)
+    var link: String? = null,
+
+    @Column(name = "entity_type", length = 50)
+    var entityType: String? = null,
+
+    @Column(name = "entity_id")
+    var entityId: Long? = null,
+
     @Column(name = "is_read", nullable = false)
     var isRead: Boolean = false,
+
+    @Column(name = "read_at")
+    var readAt: LocalDateTime? = null,
+
+    @Column(name = "email_sent", nullable = false)
+    var emailSent: Boolean = false,
 
     @Column(name = "created_at", nullable = false, updatable = false)
     val createdAt: LocalDateTime = LocalDateTime.now()
