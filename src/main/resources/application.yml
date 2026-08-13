@@ -63,7 +63,9 @@ oms:
     password-reset:
       token-ttl-minutes: 30
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
+    # Local dev serves Angular on 4200 (default) or 4300 (alternate preview port).
+    # Deployed environments override this via the CORS_ALLOWED_ORIGINS env var.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4300}
   ai:
     # Ask OMS copilot. Default 'template' needs no key and makes no external
     # calls — the deterministic OMS answer is returned as-is. Set to
