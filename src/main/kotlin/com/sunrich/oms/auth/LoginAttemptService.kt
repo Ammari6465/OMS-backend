@@ -1,5 +1,6 @@
 package com.sunrich.oms.auth
 
+import com.sunrich.oms.user.User
 import com.sunrich.oms.user.UserRepository
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -42,11 +43,11 @@ class LoginAttemptService(
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    fun recordSuccess(userId: Long) {
-        val user = userRepository.findById(userId).orElse(null) ?: return
+    fun recordSuccess(userId: Long): User? {
+        val user = userRepository.findById(userId).orElse(null) ?: return null
         user.failedLoginAttempts = 0
         user.lockedUntil = null
         user.lastLogin = LocalDateTime.now()
-        userRepository.save(user)
+        return userRepository.save(user)
     }
 }
