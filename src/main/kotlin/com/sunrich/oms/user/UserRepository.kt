@@ -25,4 +25,20 @@ interface UserRepository : JpaRepository<User, Long>, JpaSpecificationExecutor<U
     fun existsByStaffIdAndIsDeletedFalseAndIsActiveTrue(staffId: Long): Boolean
 
     fun countByIsDeletedFalse(): Long
+
+    fun countByIsDeletedFalseAndIsActiveTrue(): Long
+
+    fun countByIsDeletedFalseAndIsActiveFalse(): Long
+
+    fun countByIsDeletedFalseAndRole(role: com.sunrich.oms.common.enums.Role): Long
+
+    fun countByIsDeletedFalseAndRoleAndIsActiveTrue(role: com.sunrich.oms.common.enums.Role): Long
+
+    fun countByCompanyIdAndIsDeletedFalse(companyId: Long): Long
+
+    fun countByCompanyIdAndIsDeletedFalseAndIsActiveTrue(companyId: Long): Long
+
+    fun countByCompanyIdAndIsDeletedFalseAndIsActiveFalse(companyId: Long): Long
+
+    fun countByCompanyIdAndIsDeletedFalseAndRole(companyId: Long, role: com.sunrich.oms.common.enums.Role): Long
 }

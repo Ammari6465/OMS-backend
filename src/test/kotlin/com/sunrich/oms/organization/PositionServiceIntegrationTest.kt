@@ -113,7 +113,7 @@ class PositionServiceIntegrationTest {
     fun `company administrators are scoped and changes are audited`() {
         val created = service.create(request(companyA.id!!, departmentA.id!!, "Audited Position"))
         assertThat(audits.findAll()).anySatisfy { audit ->
-            assertThat(audit.fieldName).isEqualTo("Position")
+            assertThat(audit.fieldName).isEqualTo("Vacancy")
             assertThat(audit.changeType).isEqualTo(AuditAction.CREATE)
             assertThat(audit.newValue).contains("title=Audited Position")
         }

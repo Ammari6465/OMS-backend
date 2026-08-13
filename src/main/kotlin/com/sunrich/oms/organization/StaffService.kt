@@ -439,6 +439,9 @@ class StaffService(
             changedBy = actor,
             changeType = action,
             fieldName = "Staff",
+            entityType = "Staff",
+            entityId = entity.id,
+            companyId = entity.company.id,
             oldValue = oldValue,
             newValue = auditValue(entity, position)
         ))

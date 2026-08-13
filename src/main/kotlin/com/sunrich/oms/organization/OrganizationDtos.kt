@@ -291,3 +291,10 @@ data class PositionResponse(
     val createdAt: LocalDateTime?,
     val updatedAt: LocalDateTime?
 )
+
+data class VacancySummaryResponse(
+    val total: Long,
+    val open: Long,
+    val filled: Long,
+    val closed: Long
+)

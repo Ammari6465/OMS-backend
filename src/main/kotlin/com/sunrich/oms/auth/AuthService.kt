@@ -16,6 +16,8 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
 import java.util.UUID
+import com.sunrich.oms.common.enums.AuditAction
+import com.sunrich.oms.systemdata.AuditTrailService
 
 @Service
 class AuthService(
@@ -24,6 +26,7 @@ class AuthService(
     private val jwtService: JwtService,
     private val loginAttemptService: LoginAttemptService,
     private val notificationEmailService: NotificationEmailService,
+    private val auditTrail: AuditTrailService,
     @Value("\${oms.security.jwt.expiration-ms}") private val jwtExpirationMs: Long,
     @Value("\${oms.security.password-reset.token-ttl-minutes}") private val resetTokenTtlMinutes: Long,
     @Value("\${oms.frontend.base-url}") private val frontendBaseUrl: String
@@ -56,6 +59,8 @@ class AuthService(
         }
 
         loginAttemptService.recordSuccess(user.id!!)
+        auditTrail.record(user, AuditAction.LOGIN, "Authentication", user.id, user.companyId, "Login",
+            after = "username=${user.username},result=SUCCESS")
 
         val token = jwtService.generateToken(user.id!!, user.username, user.role, user.companyId)
         return LoginResponse(
@@ -84,9 +89,13 @@ class AuthService(
         if (duplicate != null && duplicate.id != user.id) {
             throw BadRequestException("That email address is already in use")
         }
+        val before = "fullName=${user.fullName},email=${user.email}"
         user.fullName = request.fullName.trim()
         user.email = request.email.trim()
-        return userRepository.save(user).toCurrentUserResponse()
+        val saved = userRepository.save(user)
+        auditTrail.record(saved, AuditAction.UPDATE, "Profile", saved.id, saved.companyId, "Profile updated",
+            before, "fullName=${saved.fullName},email=${saved.email}")
+        return saved.toCurrentUserResponse()
     }
 
     @Transactional
@@ -100,6 +109,8 @@ class AuthService(
         }
         user.passwordHash = passwordEncoder.encode(request.newPassword)
         userRepository.save(user)
+        auditTrail.record(user, AuditAction.PASSWORD_CHANGE, "Authentication", user.id, user.companyId, "Password changed",
+            after = "username=${user.username},result=SUCCESS")
     }
 
     /**
@@ -118,6 +129,8 @@ class AuthService(
         user.passwordResetToken = token
         user.passwordResetExpires = LocalDateTime.now().plusMinutes(resetTokenTtlMinutes)
         userRepository.save(user)
+        auditTrail.record(user, AuditAction.PASSWORD_RESET, "Authentication", user.id, user.companyId, "Password reset requested",
+            after = "username=${user.username},result=REQUESTED")
         notificationEmailService.sendPasswordReset(
             user.email,
             "${frontendBaseUrl.trimEnd('/')}/auth/reset-password?token=$token"
@@ -139,6 +152,8 @@ class AuthService(
         user.failedLoginAttempts = 0
         user.lockedUntil = null
         userRepository.save(user)
+        auditTrail.record(user, AuditAction.PASSWORD_RESET, "Authentication", user.id, user.companyId, "Password reset completed",
+            after = "username=${user.username},result=SUCCESS")
     }
 
     private fun User.toCurrentUserResponse() = CurrentUserResponse(

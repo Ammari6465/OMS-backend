@@ -19,6 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.test.context.ActiveProfiles
 import java.time.LocalDateTime
+import org.springframework.jdbc.core.JdbcTemplate
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -35,9 +36,11 @@ class AuthServiceTest {
 
     @Autowired
     private lateinit var jwtService: JwtService
+    @Autowired private lateinit var jdbc: JdbcTemplate
 
     @BeforeEach
     fun setUp() {
+        jdbc.update("DELETE FROM audit_log")
         userRepository.deleteAll()
     }
 

@@ -25,4 +25,10 @@ interface PositionRepository : JpaRepository<Position, Long>, JpaSpecificationEx
     fun countByReportsToPosition_IdAndIsDeletedFalse(positionId: Long): Long
     fun existsByCompany_IdAndTitleIgnoreCaseAndIsDeletedFalse(companyId: Long, title: String): Boolean
     fun existsByCompany_IdAndTitleIgnoreCaseAndIsDeletedFalseAndIdNot(companyId: Long, title: String, id: Long): Boolean
+    fun countByIsDeletedFalse(): Long
+    fun countByIsDeletedFalseAndStatus(status: com.sunrich.oms.common.enums.PositionStatus): Long
+    fun countByIsDeletedFalseAndStatusAndIsVacantTrue(status: com.sunrich.oms.common.enums.PositionStatus): Long
+    fun countByCompany_IdAndIsDeletedFalse(companyId: Long): Long
+    fun countByCompany_IdAndIsDeletedFalseAndStatus(companyId: Long, status: com.sunrich.oms.common.enums.PositionStatus): Long
+    fun countByCompany_IdAndIsDeletedFalseAndStatusAndIsVacantTrue(companyId: Long, status: com.sunrich.oms.common.enums.PositionStatus): Long
 }

@@ -13,10 +13,19 @@ data class UserAdminResponse(
     val email: String,
     val role: Role,
     val companyId: Long?,
+    val companyName: String?,
     val staffId: Long?,
+    val staffName: String?,
+    val departmentId: Long?,
+    val departmentName: String?,
+    val employeeCode: String?,
     val isActive: Boolean,
+    val isLocked: Boolean,
+    val lockedUntil: LocalDateTime?,
+    val failedLoginAttempts: Int,
     val lastLogin: LocalDateTime?,
     val isDeleted: Boolean,
+    val version: Long,
     val createdAt: LocalDateTime?,
     val updatedAt: LocalDateTime?
 )
@@ -39,7 +48,28 @@ data class UpdateUserRequest(
     val role: Role,
     val companyId: Long? = null,
     val staffId: Long? = null,
-    val isActive: Boolean = true
+    val isActive: Boolean = true,
+    val version: Long
+)
+
+data class UserStatusRequest(val isActive: Boolean, val version: Long)
+data class UserRoleRequest(val role: Role, val version: Long)
+data class UserVersionRequest(val version: Long)
+
+data class UserSummaryResponse(
+    val total: Long,
+    val active: Long,
+    val inactive: Long,
+    val locked: Long,
+    val administrators: Long
+)
+
+data class RoleResponse(
+    val role: Role,
+    val description: String,
+    val accessLevel: String,
+    val permissions: List<String>,
+    val assignedUsers: Long
 )
 
 fun User.toAdminResponse() = UserAdminResponse(
@@ -49,10 +79,19 @@ fun User.toAdminResponse() = UserAdminResponse(
     email = email,
     role = role,
     companyId = companyId,
+    companyName = company?.name,
     staffId = staffId,
+    staffName = staff?.name,
+    departmentId = staff?.department?.id,
+    departmentName = staff?.department?.name,
+    employeeCode = staff?.employeeCode,
     isActive = isActive,
+    isLocked = isLocked,
+    lockedUntil = lockedUntil,
+    failedLoginAttempts = failedLoginAttempts,
     lastLogin = lastLogin,
     isDeleted = isDeleted,
+    version = version,
     createdAt = createdAt,
     updatedAt = updatedAt
 )

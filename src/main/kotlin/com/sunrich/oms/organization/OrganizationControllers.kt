@@ -48,12 +48,16 @@ class PositionController(private val service: PositionService) {
         @RequestParam(required = false) reportsToPositionId: Long?,
         @RequestParam(required = false) assigned: Boolean?,
         @RequestParam(required = false) vacant: Boolean?,
+        @RequestParam(required = false) positionId: Long?,
         @RequestParam(defaultValue = "false") includeDeleted: Boolean
     ) = ApiResponse.ok(service.list(page, size, sort, direction, search, companyId, departmentId,
-        status, reportsToPositionId, assigned, vacant, includeDeleted))
+        status, reportsToPositionId, assigned, vacant, includeDeleted, positionId))
 
     @GetMapping("/records/positions")
     fun legacyList(@RequestParam(defaultValue = "false") includeDeleted: Boolean) = ApiResponse.ok(service.listLegacy(includeDeleted))
+
+    @GetMapping("/vacancies/summary")
+    fun vacancySummary(@RequestParam(required = false) companyId: Long?) = ApiResponse.ok(service.vacancySummary(companyId))
 
     @GetMapping(value = ["/positions/{id}", "/records/positions/{id}"])
     fun get(@PathVariable id: Long) = ApiResponse.ok(service.get(id))

@@ -7,6 +7,8 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
+import com.sunrich.oms.common.enums.AuditAction
+import com.sunrich.oms.systemdata.AuditTrailService
 
 /**
  * Persists login-attempt outcomes in their OWN transaction.
@@ -20,6 +22,7 @@ import java.time.LocalDateTime
 @Service
 class LoginAttemptService(
     private val userRepository: UserRepository,
+    private val auditTrail: AuditTrailService,
     @Value("\${oms.security.login.max-failed-attempts}") private val maxFailedAttempts: Int,
     @Value("\${oms.security.login.lock-duration-minutes}") private val lockDurationMinutes: Long
 ) {
@@ -34,6 +37,8 @@ class LoginAttemptService(
             log.warn("Account '{}' locked after {} failed login attempts", user.username, user.failedLoginAttempts)
         }
         userRepository.save(user)
+        auditTrail.record(user, AuditAction.LOGIN_FAILED, "Authentication", user.id, user.companyId, "Login failed",
+            after = "username=${user.username},failedAttempts=${user.failedLoginAttempts},locked=${user.isLocked}")
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

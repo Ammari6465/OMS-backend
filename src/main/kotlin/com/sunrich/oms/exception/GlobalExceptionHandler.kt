@@ -14,6 +14,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
+import org.springframework.web.HttpRequestMethodNotSupportedException
 
 /**
  * Centralised translation of exceptions into consistent [ErrorResponse] bodies.
@@ -51,6 +52,10 @@ class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException::class)
     fun handleUnreadable(ex: HttpMessageNotReadableException, req: HttpServletRequest): ResponseEntity<ErrorResponse> =
         build(HttpStatus.BAD_REQUEST, "Malformed or missing request body", req)
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException::class)
+    fun handleMethodNotAllowed(ex: HttpRequestMethodNotSupportedException, req: HttpServletRequest): ResponseEntity<ErrorResponse> =
+        build(HttpStatus.METHOD_NOT_ALLOWED, "This operation is not supported", req)
 
     @ExceptionHandler(DataIntegrityViolationException::class)
     fun handleDataIntegrity(ex: DataIntegrityViolationException, req: HttpServletRequest): ResponseEntity<ErrorResponse> {

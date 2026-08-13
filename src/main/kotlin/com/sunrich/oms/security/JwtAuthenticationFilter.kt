@@ -9,6 +9,8 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource
 import org.springframework.stereotype.Component
 import org.springframework.web.filter.OncePerRequestFilter
+import com.sunrich.oms.common.enums.EntityStatus
+import com.sunrich.oms.user.UserRepository
 
 /**
  * Reads the Bearer token, validates it and, on success, populates the
@@ -16,7 +18,8 @@ import org.springframework.web.filter.OncePerRequestFilter
  */
 @Component
 class JwtAuthenticationFilter(
-    private val jwtService: JwtService
+    private val jwtService: JwtService,
+    private val users: UserRepository
 ) : OncePerRequestFilter() {
 
     override fun doFilterInternal(
@@ -30,7 +33,14 @@ class JwtAuthenticationFilter(
         ) {
             val token = header.substring(BEARER_PREFIX.length)
             val principal = jwtService.parse(token)
-            if (principal != null) {
+            val currentUser = principal?.let { users.findById(it.userId).orElse(null) }
+            // JWTs are stateless, but account authorization is mutable. Re-check the
+            // security-critical account state so deactivation, locking, deletion,
+            // role changes, and company-scope changes invalidate old tokens immediately.
+            if (principal != null && currentUser != null && !currentUser.isDeleted && currentUser.isActive &&
+                currentUser.status == EntityStatus.ACTIVE && !currentUser.isLocked &&
+                currentUser.username == principal.username && currentUser.role == principal.role &&
+                currentUser.companyId == principal.companyId) {
                 val authentication = UsernamePasswordAuthenticationToken(
                     principal,
                     null,

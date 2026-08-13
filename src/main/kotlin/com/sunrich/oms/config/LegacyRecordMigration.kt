@@ -165,6 +165,8 @@ class LegacyRecordMigrationService(
                 changedBy = migrationUser,
                 changeType = action,
                 fieldName = p.text("entityType") ?: "Legacy",
+                entityType = p.text("entityType") ?: "Legacy",
+                entityId = p.long("entityId"),
                 oldValue = null,
                 newValue = p.text("summary") ?: "Migrated legacy audit entry",
                 changedAt = p.dateTime("changedAt") ?: record.createdAt ?: LocalDateTime.now()

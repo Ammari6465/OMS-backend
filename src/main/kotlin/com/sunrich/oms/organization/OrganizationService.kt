@@ -6,6 +6,11 @@ import com.sunrich.oms.exception.BadRequestException
 import com.sunrich.oms.exception.ConflictException
 import com.sunrich.oms.exception.ResourceNotFoundException
 import com.sunrich.oms.realtime.OrganogramUpdatePublisher
+import com.sunrich.oms.common.enums.AuditAction
+import com.sunrich.oms.security.SecurityUtils
+import com.sunrich.oms.systemdata.AuditLog
+import com.sunrich.oms.systemdata.AuditLogRepository
+import com.sunrich.oms.user.UserRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -15,14 +20,16 @@ class OrganizationService(
     private val departments: DepartmentRepository,
     private val staff: StaffRepository,
     private val positions: PositionRepository,
-    private val updates: OrganogramUpdatePublisher
+    private val updates: OrganogramUpdatePublisher,
+    private val audits: AuditLogRepository,
+    private val users: UserRepository
 ) {
     @Transactional(readOnly = true)
     fun listCompanies(includeDeleted: Boolean) = companies.findAll()
         .filter { includeDeleted || !it.isDeleted }.map(::companyResponse)
 
     @Transactional
-    fun createCompany(request: CompanyRequest): CompanyResponse = companyResponse(companies.save(
+    fun createCompany(request: CompanyRequest): CompanyResponse { val saved = companies.save(
         Company(
             name = requiredText(request.name, "Company name"),
             regNumber = request.regNumber.clean(),
@@ -30,28 +37,31 @@ class OrganizationService(
             dateEstablished = request.dateEstablished,
             logoUrl = request.logoUrl.clean(),
             status = request.status ?: EntityStatus.ACTIVE
-        )
-    )).also { updates.publish("Company", "CREATE", it.id) }
+        ))
+        recordCompanyAudit(AuditAction.CREATE, saved, null)
+        return companyResponse(saved).also { updates.publish("Company", "CREATE", it.id) }
+    }
 
     @Transactional
     fun updateCompany(id: Long, request: CompanyRequest): CompanyResponse {
         val entity = company(id)
+        val old = companyAuditValue(entity)
         request.name?.let { entity.name = requiredText(it, "Company name") }
         entity.regNumber = request.regNumber.clean()
         entity.headOffice = request.headOffice.clean()
         entity.dateEstablished = request.dateEstablished
         entity.logoUrl = request.logoUrl.clean()
         request.status?.let { entity.status = it }
-        return companyResponse(companies.save(entity)).also { updates.publish("Company", "UPDATE", it.id) }
+        val saved = companies.save(entity)
+        recordCompanyAudit(AuditAction.UPDATE, saved, old)
+        return companyResponse(saved).also { updates.publish("Company", "UPDATE", it.id) }
     }
 
     @Transactional
-    fun deleteCompany(id: Long) = companies.save(company(id).apply { markDeleted() })
-        .also { updates.publish("Company", "DELETE", id) }
+    fun deleteCompany(id: Long): Company { val entity=company(id); val old=companyAuditValue(entity); val saved=companies.save(entity.apply { markDeleted() }); recordCompanyAudit(AuditAction.DELETE,saved,old); updates.publish("Company", "DELETE", id); return saved }
 
     @Transactional
-    fun restoreCompany(id: Long) = companyResponse(companies.save(company(id).apply { restore() }))
-        .also { updates.publish("Company", "RESTORE", id) }
+    fun restoreCompany(id: Long): CompanyResponse { val saved=companies.save(company(id).apply { restore() });recordCompanyAudit(AuditAction.RESTORE,saved,null);return companyResponse(saved).also { updates.publish("Company", "RESTORE", id) } }
 
     @Transactional(readOnly = true)
     fun listPositions(includeDeleted: Boolean) = positions.findAll()
@@ -150,4 +160,12 @@ class OrganizationService(
         value ?: throw BadRequestException("$field is required")
 
     private fun String?.clean(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
+
+    private fun recordCompanyAudit(action: AuditAction, company: Company, old: String?) {
+        val actorId = SecurityUtils.currentUserIdOrNull() ?: return
+        val actor = users.findById(actorId).orElse(null) ?: return
+        audits.save(AuditLog(changedBy=actor,changeType=action,fieldName="Company",entityType="Company",
+            entityId=company.id,companyId=company.id,oldValue=old,newValue=companyAuditValue(company)))
+    }
+    private fun companyAuditValue(company: Company) = "id=${company.id},name=${company.name},status=${company.status},deleted=${company.isDeleted}"
 }

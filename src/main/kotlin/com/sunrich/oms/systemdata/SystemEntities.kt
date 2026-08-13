@@ -49,6 +49,15 @@ class AuditLog(
     @Column(name = "field_name", nullable = false, length = 100)
     val fieldName: String,
 
+    @Column(name = "entity_type", nullable = false, length = 50)
+    val entityType: String = fieldName.substringBefore(" #"),
+
+    @Column(name = "entity_id")
+    val entityId: Long? = staff?.id,
+
+    @Column(name = "company_id")
+    val companyId: Long? = staff?.company?.id ?: changedBy.companyId,
+
     @Lob
     @Column(name = "old_value", columnDefinition = "TEXT")
     val oldValue: String? = null,

@@ -4,6 +4,7 @@ import com.sunrich.oms.common.dto.PageResponse
 import com.sunrich.oms.common.enums.AuditAction
 import com.sunrich.oms.common.enums.EntityStatus
 import com.sunrich.oms.common.enums.PositionStatus
+import com.sunrich.oms.common.enums.NotificationType
 import com.sunrich.oms.exception.BadRequestException
 import com.sunrich.oms.exception.ConflictException
 import com.sunrich.oms.exception.ForbiddenException
@@ -12,6 +13,8 @@ import com.sunrich.oms.realtime.OrganogramUpdatePublisher
 import com.sunrich.oms.security.SecurityUtils
 import com.sunrich.oms.systemdata.AuditLog
 import com.sunrich.oms.systemdata.AuditLogRepository
+import com.sunrich.oms.systemdata.Notification
+import com.sunrich.oms.systemdata.NotificationRepository
 import com.sunrich.oms.user.UserRepository
 import jakarta.persistence.criteria.JoinType
 import org.springframework.data.domain.PageRequest
@@ -28,13 +31,15 @@ class PositionService(
     private val staff: StaffRepository,
     private val users: UserRepository,
     private val audits: AuditLogRepository,
+    private val notifications: NotificationRepository,
     private val updates: OrganogramUpdatePublisher
 ) {
     @Transactional(readOnly = true)
     fun list(
         page: Int, size: Int, sort: String, direction: String, search: String?,
         companyId: Long?, departmentId: Long?, status: PositionStatus?,
-        reportsToPositionId: Long?, assigned: Boolean?, vacant: Boolean?, includeDeleted: Boolean
+        reportsToPositionId: Long?, assigned: Boolean?, vacant: Boolean?, includeDeleted: Boolean,
+        positionId: Long? = null
     ): PageResponse<PositionResponse> {
         val effectiveCompanyId = scopedCompanyId(companyId)
         val pageable = PageRequest.of(
@@ -46,6 +51,7 @@ class PositionService(
         val specification = Specification<Position> { root, _, cb ->
             val predicates = mutableListOf<jakarta.persistence.criteria.Predicate>()
             if (!includeDeleted) predicates += cb.isFalse(root.get("isDeleted"))
+            positionId?.let { predicates += cb.equal(root.get<Long>("id"), it) }
             effectiveCompanyId?.let { predicates += cb.equal(root.get<Company>("company").get<Long>("id"), it) }
             departmentId?.let { predicates += cb.equal(root.get<Department>("department").get<Long>("id"), it) }
             status?.let { predicates += cb.equal(root.get<PositionStatus>("status"), it) }
@@ -86,6 +92,22 @@ class PositionService(
     @Transactional(readOnly = true)
     fun get(id: Long): PositionResponse = toResponse(accessiblePosition(id, false), includeChildCount = true)
 
+    @Transactional(readOnly = true)
+    fun vacancySummary(companyId: Long?): VacancySummaryResponse {
+        val effectiveCompanyId = scopedCompanyId(companyId)
+        return if (effectiveCompanyId == null) VacancySummaryResponse(
+            total = positions.countByIsDeletedFalse(),
+            open = positions.countByIsDeletedFalseAndStatusAndIsVacantTrue(PositionStatus.OPEN),
+            filled = positions.countByIsDeletedFalseAndStatus(PositionStatus.FILLED),
+            closed = positions.countByIsDeletedFalseAndStatus(PositionStatus.CLOSED)
+        ) else VacancySummaryResponse(
+            total = positions.countByCompany_IdAndIsDeletedFalse(effectiveCompanyId),
+            open = positions.countByCompany_IdAndIsDeletedFalseAndStatusAndIsVacantTrue(effectiveCompanyId, PositionStatus.OPEN),
+            filled = positions.countByCompany_IdAndIsDeletedFalseAndStatus(effectiveCompanyId, PositionStatus.FILLED),
+            closed = positions.countByCompany_IdAndIsDeletedFalseAndStatus(effectiveCompanyId, PositionStatus.CLOSED)
+        )
+    }
+
     @Transactional
     fun create(request: PositionCreateRequest): PositionResponse {
         val companyId = request.companyId ?: throw BadRequestException("Company is required")
@@ -103,7 +125,8 @@ class PositionService(
         applyOccupancyState(entity)
         val saved = positions.saveAndFlush(entity)
         return toResponse(saved).also {
-            recordAudit(AuditAction.CREATE, saved, null)
+            recordAudit(AuditAction.CREATE, saved, null, if (saved.isVacant) "Vacancy" else "Position")
+            if (saved.isVacant) notifyActor(NotificationType.VACANCY_OPENED, "${saved.title} vacancy was opened.")
             updates.publish("Position", "CREATE", it.id)
         }
     }
@@ -113,6 +136,7 @@ class PositionService(
         val entity = accessiblePosition(id, false)
         if (entity.version != request.version) throw ConflictException("Position was modified by another user. Reload and try again.")
         val oldValue = auditValue(entity)
+        val oldStatus = entity.status
         val oldParentId = entity.reportsToPosition?.id
         val companyId = request.companyId ?: throw BadRequestException("Company is required")
         requireCompanyAccess(companyId)
@@ -130,7 +154,13 @@ class PositionService(
         applyOccupancyState(entity)
         val saved = positions.saveAndFlush(entity)
         return toResponse(saved).also {
-            recordAudit(if (oldParentId != saved.reportsToPosition?.id) AuditAction.REPARENT else AuditAction.UPDATE, saved, oldValue)
+            val vacancyTransition = oldStatus != saved.status
+            recordAudit(if (oldParentId != saved.reportsToPosition?.id) AuditAction.REPARENT else AuditAction.UPDATE,
+                saved, oldValue, if (vacancyTransition) "Vacancy" else "Position")
+            if (vacancyTransition) {
+                val type = if (saved.status == PositionStatus.OPEN) NotificationType.VACANCY_OPENED else NotificationType.VACANCY_CLOSED
+                notifyActor(type, "${saved.title} vacancy is now ${saved.status.name.lowercase()}.")
+            }
             updates.publish("Position", "UPDATE", it.id)
         }
     }
@@ -285,11 +315,18 @@ class PositionService(
         createdBy = entity.createdBy, updatedBy = entity.updatedBy, createdAt = entity.createdAt, updatedAt = entity.updatedAt
     )
 
-    private fun recordAudit(action: AuditAction, entity: Position, oldValue: String?) {
+    private fun recordAudit(action: AuditAction, entity: Position, oldValue: String?, fieldName: String = "Position") {
         val principal = SecurityUtils.currentPrincipalOrNull() ?: return
         val actor = users.findById(principal.userId).orElse(null) ?: return
-        audits.save(AuditLog(changedBy = actor, changeType = action, fieldName = "Position",
+        audits.save(AuditLog(changedBy = actor, changeType = action, fieldName = fieldName,
+            entityType = if (fieldName == "Vacancy") "Vacancy" else "Position", entityId = entity.id, companyId = entity.company.id,
             oldValue = oldValue, newValue = auditValue(entity)))
+    }
+
+    private fun notifyActor(type: NotificationType, message: String) {
+        val principal = SecurityUtils.currentPrincipalOrNull() ?: return
+        val actor = users.findById(principal.userId).orElse(null) ?: return
+        notifications.save(Notification(recipient = actor, type = type, message = message))
     }
 
     private fun auditValue(entity: Position) =

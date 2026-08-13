@@ -51,7 +51,9 @@ enum class AuditAction {
     TRANSFER,
     REPARENT,
     LOGIN,
+    LOGIN_FAILED,
     LOGOUT,
+    PASSWORD_CHANGE,
     PASSWORD_RESET,
     IMPORT
 }

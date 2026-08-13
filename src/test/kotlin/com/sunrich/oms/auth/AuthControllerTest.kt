@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.jdbc.core.JdbcTemplate
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -39,9 +40,11 @@ class AuthControllerTest {
 
     @Autowired
     private lateinit var jwtService: JwtService
+    @Autowired private lateinit var jdbc: JdbcTemplate
 
     @BeforeEach
     fun setUp() {
+        jdbc.update("DELETE FROM audit_log")
         userRepository.deleteAll()
     }
 

@@ -230,6 +230,9 @@ class DepartmentService(
             changedBy = actor,
             changeType = action,
             fieldName = "Department",
+            entityType = "Department",
+            entityId = entity.id,
+            companyId = entity.company.id,
             oldValue = oldValue,
             newValue = auditValue(entity)
         ))
