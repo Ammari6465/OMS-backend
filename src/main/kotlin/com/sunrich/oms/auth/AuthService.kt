@@ -58,15 +58,15 @@ class AuthService(
             throw UnauthorizedException("Invalid username or password")
         }
 
-        val activeUser = loginAttemptService.recordSuccess(user.id!!) ?: user
-        auditTrail.record(activeUser, AuditAction.LOGIN, "Authentication", activeUser.id, activeUser.companyId, "Login",
-            after = "username=${activeUser.username},result=SUCCESS")
+        loginAttemptService.recordSuccess(user.id!!)
+        auditTrail.record(user, AuditAction.LOGIN, "Authentication", user.id, user.companyId, "Login",
+            after = "username=${user.username},result=SUCCESS")
 
-        val token = jwtService.generateToken(activeUser.id!!, activeUser.username, activeUser.role, activeUser.companyId)
+        val token = jwtService.generateToken(user.id!!, user.username, user.role, user.companyId)
         return LoginResponse(
             token = token,
             expiresInMs = jwtExpirationMs,
-            user = activeUser.toCurrentUserResponse()
+            user = user.toCurrentUserResponse()
         )
     }
 

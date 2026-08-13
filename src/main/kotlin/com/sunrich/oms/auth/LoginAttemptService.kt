@@ -43,11 +43,11 @@ class LoginAttemptService(
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    fun recordSuccess(userId: Long): User? {
-        val user = userRepository.findById(userId).orElse(null) ?: return null
+    fun recordSuccess(userId: Long) {
+        val user = userRepository.findById(userId).orElse(null) ?: return
         user.failedLoginAttempts = 0
         user.lockedUntil = null
         user.lastLogin = LocalDateTime.now()
-        return userRepository.save(user)
+        userRepository.save(user)
     }
 }
