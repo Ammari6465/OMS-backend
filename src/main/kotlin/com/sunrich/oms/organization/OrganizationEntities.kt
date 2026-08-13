@@ -17,6 +17,7 @@ import jakarta.persistence.Index
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
+import jakarta.persistence.UniqueConstraint
 import java.time.LocalDate
 
 @Entity
@@ -53,6 +54,12 @@ class Company(
 @Entity
 @Table(
     name = "departments",
+    uniqueConstraints = [
+        UniqueConstraint(
+            name = "uk_departments_company_name",
+            columnNames = ["company_id", "name"]
+        )
+    ],
     indexes = [
         Index(name = "idx_departments_company", columnList = "company_id,is_deleted"),
         Index(name = "idx_departments_parent", columnList = "parent_dept_id")
@@ -90,10 +97,19 @@ class Department(
 @Entity
 @Table(
     name = "staff",
+    uniqueConstraints = [
+        UniqueConstraint(
+            name = "uq_staff_company_empcode",
+            columnNames = ["company_id", "employee_code"]
+        )
+    ],
     indexes = [
         Index(name = "idx_staff_company", columnList = "company_id,is_deleted"),
         Index(name = "idx_staff_department", columnList = "dept_id"),
-        Index(name = "idx_staff_manager", columnList = "manager_id")
+        Index(name = "idx_staff_manager", columnList = "manager_id"),
+        Index(name = "idx_staff_status", columnList = "status"),
+        Index(name = "idx_staff_name", columnList = "name"),
+        Index(name = "idx_staff_email", columnList = "email")
     ]
 )
 class Staff(
@@ -109,7 +125,7 @@ class Staff(
     @JoinColumn(name = "manager_id", foreignKey = ForeignKey(name = "fk_staff_manager"))
     var manager: Staff? = null,
 
-    @Column(name = "employee_code", length = 100, unique = true)
+    @Column(name = "employee_code", length = 100)
     var employeeCode: String? = null,
 
     @Column(nullable = false, length = 200)
@@ -156,7 +172,8 @@ class Staff(
     indexes = [
         Index(name = "idx_positions_company", columnList = "company_id,is_deleted"),
         Index(name = "idx_positions_department", columnList = "dept_id"),
-        Index(name = "idx_positions_staff", columnList = "staff_id")
+        Index(name = "idx_positions_staff", columnList = "staff_id"),
+        Index(name = "idx_positions_reports_to", columnList = "reports_to_position_id")
     ]
 )
 class Position(
@@ -170,6 +187,10 @@ class Position(
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "dept_id", foreignKey = ForeignKey(name = "fk_positions_department"))
     var department: Department? = null,
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reports_to_position_id", foreignKey = ForeignKey(name = "fk_position_reports_to"))
+    var reportsToPosition: Position? = null,
 
     @Column(name = "is_vacant", nullable = false)
     var isVacant: Boolean = true,

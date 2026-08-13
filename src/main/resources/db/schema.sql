@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS staff (
     company_id      BIGINT UNSIGNED NOT NULL,
     dept_id         BIGINT UNSIGNED NULL,
     manager_id      BIGINT UNSIGNED NULL,
-    employee_code   VARCHAR(50)     NULL,
+    employee_code   VARCHAR(100)    NULL,
     name            VARCHAR(200)    NOT NULL,
     title           VARCHAR(200)    NULL,
     emp_type        VARCHAR(20)     NOT NULL DEFAULT 'PERMANENT',

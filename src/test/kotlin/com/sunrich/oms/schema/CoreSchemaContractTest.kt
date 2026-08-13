@@ -33,7 +33,7 @@ class CoreSchemaContractTest {
                 "staff_id", "company_id", "dept_id", "manager_id", "name", "title", "emp_type",
                 "email", "landline", "cell_number", "date_joined", "date_left", "status", "photo_url"
             )
-            assertColumns(columnsByTable, "positions", "position_id", "company_id", "title", "dept_id", "is_vacant", "staff_id")
+            assertColumns(columnsByTable, "positions", "position_id", "company_id", "title", "dept_id", "reports_to_position_id", "is_vacant", "staff_id")
             assertColumns(columnsByTable, "users", "user_id", "staff_id", "email", "password_hash", "role", "is_active", "last_login")
             assertColumns(
                 columnsByTable,
@@ -58,6 +58,7 @@ class CoreSchemaContractTest {
             assertForeignKey(metadata, connection.catalog, "positions", "company_id", "companies", "company_id")
             assertForeignKey(metadata, connection.catalog, "positions", "dept_id", "departments", "dept_id")
             assertForeignKey(metadata, connection.catalog, "positions", "staff_id", "staff", "staff_id")
+            assertForeignKey(metadata, connection.catalog, "positions", "reports_to_position_id", "positions", "position_id")
             assertForeignKey(metadata, connection.catalog, "users", "staff_id", "staff", "staff_id")
             assertForeignKey(metadata, connection.catalog, "audit_log", "staff_id", "staff", "staff_id")
             assertForeignKey(metadata, connection.catalog, "audit_log", "changed_by", "users", "user_id")

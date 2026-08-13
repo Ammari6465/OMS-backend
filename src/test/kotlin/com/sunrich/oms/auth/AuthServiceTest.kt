@@ -2,6 +2,7 @@ package com.sunrich.oms.auth
 
 import com.sunrich.oms.common.enums.EntityStatus
 import com.sunrich.oms.common.enums.Role
+import com.sunrich.oms.exception.BadRequestException
 import com.sunrich.oms.exception.UnauthorizedException
 import com.sunrich.oms.security.JwtService
 import com.sunrich.oms.user.User
@@ -121,5 +122,29 @@ class AuthServiceTest {
         val finalUser = userRepository.findByUsernameIgnoreCaseAndIsDeletedFalse("reset_user").get()
         assertNull(finalUser.passwordResetToken)
         assertTrue(passwordEncoder.matches(newPassword, finalUser.passwordHash))
+    }
+
+    @Test
+    fun `resetPassword fails with invalid reset token`() {
+        assertThrows(BadRequestException::class.java) {
+            authService.resetPassword(ResetPasswordRequest(token = "invalid-token-123", newPassword = "NewPassword@123"))
+        }
+    }
+
+    @Test
+    fun `resetPassword fails with expired reset token`() {
+        val user = User(
+            username = "expired_reset_user",
+            email = "expired_reset@example.com",
+            passwordHash = passwordEncoder.encode("OldPassword123"),
+            role = Role.STAFF,
+            passwordResetToken = "expired_token_123",
+            passwordResetExpires = LocalDateTime.now().minusMinutes(5)
+        )
+        userRepository.save(user)
+
+        assertThrows(BadRequestException::class.java) {
+            authService.resetPassword(ResetPasswordRequest(token = "expired_token_123", newPassword = "NewPassword@123"))
+        }
     }
 }

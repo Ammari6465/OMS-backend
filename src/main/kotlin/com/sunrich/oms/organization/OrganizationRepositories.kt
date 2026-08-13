@@ -1,8 +1,28 @@
 package com.sunrich.oms.organization
 
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 
 interface CompanyRepository : JpaRepository<Company, Long>
-interface DepartmentRepository : JpaRepository<Department, Long>
-interface StaffRepository : JpaRepository<Staff, Long>
-interface PositionRepository : JpaRepository<Position, Long>
+interface DepartmentRepository : JpaRepository<Department, Long>, JpaSpecificationExecutor<Department> {
+    fun existsByCompany_IdAndNameIgnoreCase(companyId: Long, name: String): Boolean
+    fun existsByCompany_IdAndNameIgnoreCaseAndIdNot(companyId: Long, name: String, id: Long): Boolean
+    fun existsByParentDepartment_IdAndIsDeletedFalse(departmentId: Long): Boolean
+    fun findAllByHeadStaff_IdAndIsDeletedFalse(staffId: Long): List<Department>
+}
+interface StaffRepository : JpaRepository<Staff, Long>, JpaSpecificationExecutor<Staff> {
+    fun existsByDepartment_IdAndIsDeletedFalse(departmentId: Long): Boolean
+    fun existsByCompany_IdAndEmployeeCodeIgnoreCase(companyId: Long, employeeCode: String): Boolean
+    fun existsByCompany_IdAndEmployeeCodeIgnoreCaseAndIdNot(companyId: Long, employeeCode: String, id: Long): Boolean
+    fun findAllByManager_IdAndIsDeletedFalse(managerId: Long): List<Staff>
+}
+interface PositionRepository : JpaRepository<Position, Long>, JpaSpecificationExecutor<Position> {
+    fun existsByDepartment_IdAndIsDeletedFalse(departmentId: Long): Boolean
+    fun findFirstByStaff_IdAndIsDeletedFalse(staffId: Long): Position?
+    fun findAllByStaff_IdAndIsDeletedFalse(staffId: Long): List<Position>
+    fun findAllByStaff_IdInAndIsDeletedFalse(staffIds: Collection<Long>): List<Position>
+    fun existsByReportsToPosition_IdAndIsDeletedFalse(positionId: Long): Boolean
+    fun countByReportsToPosition_IdAndIsDeletedFalse(positionId: Long): Long
+    fun existsByCompany_IdAndTitleIgnoreCaseAndIsDeletedFalse(companyId: Long, title: String): Boolean
+    fun existsByCompany_IdAndTitleIgnoreCaseAndIsDeletedFalseAndIdNot(companyId: Long, title: String, id: Long): Boolean
+}

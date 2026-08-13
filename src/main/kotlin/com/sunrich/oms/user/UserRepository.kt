@@ -22,5 +22,7 @@ interface UserRepository : JpaRepository<User, Long>, JpaSpecificationExecutor<U
 
     fun existsByEmailIgnoreCaseAndIsDeletedFalse(email: String): Boolean
 
+    fun existsByStaffIdAndIsDeletedFalseAndIsActiveTrue(staffId: Long): Boolean
+
     fun countByIsDeletedFalse(): Long
 }

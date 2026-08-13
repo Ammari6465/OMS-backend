@@ -1,9 +1,9 @@
 package com.sunrich.oms.organization
 
-import com.sunrich.oms.common.enums.EmploymentType
 import com.sunrich.oms.common.enums.EntityStatus
 import com.sunrich.oms.common.enums.PositionStatus
 import com.sunrich.oms.exception.BadRequestException
+import com.sunrich.oms.exception.ConflictException
 import com.sunrich.oms.exception.ResourceNotFoundException
 import com.sunrich.oms.realtime.OrganogramUpdatePublisher
 import org.springframework.stereotype.Service
@@ -54,103 +54,6 @@ class OrganizationService(
         .also { updates.publish("Company", "RESTORE", id) }
 
     @Transactional(readOnly = true)
-    fun listDepartments(includeDeleted: Boolean) = departments.findAll()
-        .filter { includeDeleted || !it.isDeleted }.map(::departmentResponse)
-
-    @Transactional
-    fun createDepartment(request: DepartmentRequest): DepartmentResponse {
-        val company = company(requiredId(request.companyId, "companyId"))
-        val entity = Department(
-            company = company,
-            name = requiredText(request.name, "Department name"),
-            description = request.description.clean(),
-            parentDepartment = request.parentDeptId?.let(::department),
-            status = request.status ?: EntityStatus.ACTIVE
-        )
-        entity.headStaff = request.headStaffId?.let(::staffMember)
-        validateDepartmentLinks(entity)
-        return departmentResponse(departments.save(entity)).also { updates.publish("Department", "CREATE", it.id) }
-    }
-
-    @Transactional
-    fun updateDepartment(id: Long, request: DepartmentRequest): DepartmentResponse {
-        val entity = department(id)
-        request.companyId?.let { entity.company = company(it) }
-        request.name?.let { entity.name = requiredText(it, "Department name") }
-        entity.description = request.description.clean()
-        entity.parentDepartment = request.parentDeptId?.let(::department)
-        entity.headStaff = request.headStaffId?.let(::staffMember)
-        request.status?.let { entity.status = it }
-        if (entity.parentDepartment?.id == entity.id) throw BadRequestException("A department cannot be its own parent")
-        validateDepartmentLinks(entity)
-        return departmentResponse(departments.save(entity)).also { updates.publish("Department", "UPDATE", it.id) }
-    }
-
-    @Transactional
-    fun deleteDepartment(id: Long) = departments.save(department(id).apply { markDeleted() })
-        .also { updates.publish("Department", "DELETE", id) }
-
-    @Transactional
-    fun restoreDepartment(id: Long) = departmentResponse(departments.save(department(id).apply { restore() }))
-        .also { updates.publish("Department", "RESTORE", id) }
-
-    @Transactional(readOnly = true)
-    fun listStaff(includeDeleted: Boolean) = staff.findAll()
-        .filter { includeDeleted || !it.isDeleted }.map(::staffResponse)
-
-    @Transactional
-    fun createStaff(request: StaffRequest): StaffResponse {
-        val entity = Staff(
-            company = company(requiredId(request.companyId, "companyId")),
-            department = request.deptId?.let(::department),
-            manager = request.managerId?.let(::staffMember),
-            employeeCode = request.employeeCode.clean(),
-            name = requiredText(request.name, "Staff name"),
-            title = request.title.clean(),
-            empType = request.empType ?: EmploymentType.PERMANENT,
-            email = request.email.clean(),
-            landline = request.landline.clean(),
-            cellNumber = request.cellNumber.clean(),
-            dateJoined = request.dateJoined,
-            dateLeft = request.dateLeft,
-            status = request.status ?: EntityStatus.ACTIVE,
-            photoUrl = request.photoUrl.clean()
-        )
-        validateStaffLinks(entity)
-        return staffResponse(staff.save(entity)).also { updates.publish("Staff", "CREATE", it.id) }
-    }
-
-    @Transactional
-    fun updateStaff(id: Long, request: StaffRequest): StaffResponse {
-        val entity = staffMember(id)
-        request.companyId?.let { entity.company = company(it) }
-        entity.department = request.deptId?.let(::department)
-        entity.manager = request.managerId?.let(::staffMember)
-        request.name?.let { entity.name = requiredText(it, "Staff name") }
-        entity.employeeCode = request.employeeCode.clean()
-        entity.title = request.title.clean()
-        request.empType?.let { entity.empType = it }
-        entity.email = request.email.clean()
-        entity.landline = request.landline.clean()
-        entity.cellNumber = request.cellNumber.clean()
-        entity.dateJoined = request.dateJoined
-        entity.dateLeft = request.dateLeft
-        request.status?.let { entity.status = it }
-        entity.photoUrl = request.photoUrl.clean()
-        if (entity.manager?.id == entity.id) throw BadRequestException("A staff member cannot manage themselves")
-        validateStaffLinks(entity)
-        return staffResponse(staff.save(entity)).also { updates.publish("Staff", "UPDATE", it.id) }
-    }
-
-    @Transactional
-    fun deleteStaff(id: Long) = staff.save(staffMember(id).apply { markDeleted() })
-        .also { updates.publish("Staff", "DELETE", id) }
-
-    @Transactional
-    fun restoreStaff(id: Long) = staffResponse(staff.save(staffMember(id).apply { restore() }))
-        .also { updates.publish("Staff", "RESTORE", id) }
-
-    @Transactional(readOnly = true)
     fun listPositions(includeDeleted: Boolean) = positions.findAll()
         .filter { includeDeleted || !it.isDeleted }.map(::positionResponse)
 
@@ -160,6 +63,7 @@ class OrganizationService(
             company = company(requiredId(request.companyId, "companyId")),
             title = requiredText(request.title, "Position title"),
             department = request.deptId?.let(::department),
+            reportsToPosition = request.reportsToPositionId?.let(::position),
             isVacant = request.isVacant ?: true,
             staff = request.staffId?.let(::staffMember),
             status = request.status ?: PositionStatus.OPEN
@@ -174,6 +78,7 @@ class OrganizationService(
         request.companyId?.let { entity.company = company(it) }
         request.title?.let { entity.title = requiredText(it, "Position title") }
         entity.department = request.deptId?.let(::department)
+        entity.reportsToPosition = request.reportsToPositionId?.let(::position)
         request.isVacant?.let { entity.isVacant = it }
         entity.staff = request.staffId?.let(::staffMember)
         request.status?.let { entity.status = it }
@@ -198,30 +103,29 @@ class OrganizationService(
     private fun position(id: Long) = positions.findById(id)
         .orElseThrow { ResourceNotFoundException("Position", id) }
 
-    private fun validateDepartmentLinks(entity: Department) {
-        if (entity.parentDepartment != null && entity.parentDepartment?.company?.id != entity.company.id) {
-            throw BadRequestException("Parent department must belong to the same company")
-        }
-        if (entity.headStaff != null && entity.headStaff?.company?.id != entity.company.id) {
-            throw BadRequestException("Department head must belong to the same company")
-        }
-    }
-
-    private fun validateStaffLinks(entity: Staff) {
-        if (entity.department != null && entity.department?.company?.id != entity.company.id) {
-            throw BadRequestException("Department must belong to the selected company")
-        }
-        if (entity.manager != null && entity.manager?.company?.id != entity.company.id) {
-            throw BadRequestException("Manager must belong to the selected company")
-        }
-    }
-
     private fun validatePositionLinks(entity: Position) {
         if (entity.department != null && entity.department?.company?.id != entity.company.id) {
             throw BadRequestException("Department must belong to the selected company")
         }
         if (entity.staff != null && entity.staff?.company?.id != entity.company.id) {
             throw BadRequestException("Assigned staff member must belong to the selected company")
+        }
+        if (entity.staff?.isDeleted == true || entity.staff?.status != null && entity.staff?.status != EntityStatus.ACTIVE) {
+            throw BadRequestException("Assigned staff member must be active")
+        }
+        if (entity.staff != null && entity.department != null && entity.staff?.department?.id != entity.department?.id) {
+            throw BadRequestException("Assigned staff member must belong to the position's department")
+        }
+        entity.staff?.id?.let { staffId ->
+            val occupied = positions.findFirstByStaff_IdAndIsDeletedFalse(staffId)
+            if (occupied != null && occupied.id != entity.id) {
+                throw ConflictException("Staff member is already assigned to another position.")
+            }
+            entity.isVacant = false
+            if (entity.status == PositionStatus.OPEN) entity.status = PositionStatus.FILLED
+        } ?: run {
+            entity.isVacant = true
+            if (entity.status == PositionStatus.FILLED) entity.status = PositionStatus.OPEN
         }
     }
 
@@ -230,20 +134,13 @@ class OrganizationService(
         e.status, e.isDeleted, e.createdAt, e.updatedAt
     )
 
-    private fun departmentResponse(e: Department) = DepartmentResponse(
-        e.id!!, e.company.id!!, e.name, e.description, e.parentDepartment?.id,
-        e.headStaff?.id, e.status, e.isDeleted, e.createdAt, e.updatedAt
-    )
-
-    private fun staffResponse(e: Staff) = StaffResponse(
-        e.id!!, e.company.id!!, e.department?.id, e.manager?.id, e.employeeCode,
-        e.name, e.title, e.empType, e.email, e.landline, e.cellNumber, e.dateJoined,
-        e.dateLeft, e.status, e.photoUrl, e.isDeleted, e.createdAt, e.updatedAt
-    )
-
     private fun positionResponse(e: Position) = PositionResponse(
-        e.id!!, e.company.id!!, e.title, e.department?.id, e.isVacant, e.staff?.id,
-        e.status, e.isDeleted, e.createdAt, e.updatedAt
+        id = e.id!!, companyId = e.company.id!!, title = e.title, companyName = e.company.name,
+        deptId = e.department?.id, departmentName = e.department?.name,
+        reportsToPositionId = e.reportsToPosition?.id, reportsToPositionTitle = e.reportsToPosition?.title,
+        isVacant = e.isVacant, staffId = e.staff?.id, staffName = e.staff?.name,
+        status = e.status, isDeleted = e.isDeleted, version = e.version,
+        createdBy = e.createdBy, updatedBy = e.updatedBy, createdAt = e.createdAt, updatedAt = e.updatedAt
     )
 
     private fun requiredText(value: String?, field: String): String =

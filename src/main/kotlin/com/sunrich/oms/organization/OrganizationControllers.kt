@@ -1,6 +1,8 @@
 package com.sunrich.oms.organization
 
 import com.sunrich.oms.common.dto.ApiResponse
+import com.sunrich.oms.common.enums.PositionStatus
+import jakarta.validation.Valid
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
@@ -32,49 +34,47 @@ class CompanyController(private val service: OrganizationService) {
 }
 
 @RestController
-@RequestMapping(value = ["/departments", "/records/departments"])
-class DepartmentController(private val service: OrganizationService) {
-    @GetMapping fun list(@RequestParam(defaultValue = "false") includeDeleted: Boolean) =
-        ApiResponse.ok(service.listDepartments(includeDeleted))
-    @PostMapping @PreAuthorize(ORG_WRITE) fun create(@RequestBody request: DepartmentRequest) =
-        ApiResponse.ok(service.createDepartment(request), "Department created")
-    @PutMapping("/{id}") @PreAuthorize(ORG_WRITE) fun update(@PathVariable id: Long, @RequestBody request: DepartmentRequest) =
-        ApiResponse.ok(service.updateDepartment(id, request), "Department updated")
-    @DeleteMapping("/{id}") @PreAuthorize(ORG_WRITE) fun delete(@PathVariable id: Long): ApiResponse<Unit> {
-        service.deleteDepartment(id); return ApiResponse.ok("Department archived")
-    }
-    @PatchMapping("/{id}/restore") @PreAuthorize(ORG_WRITE) fun restore(@PathVariable id: Long) =
-        ApiResponse.ok(service.restoreDepartment(id), "Department restored")
-}
+class PositionController(private val service: PositionService) {
+    @GetMapping("/positions")
+    fun list(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+        @RequestParam(defaultValue = "title") sort: String,
+        @RequestParam(defaultValue = "asc") direction: String,
+        @RequestParam(required = false) search: String?,
+        @RequestParam(required = false) companyId: Long?,
+        @RequestParam(required = false) departmentId: Long?,
+        @RequestParam(required = false) status: PositionStatus?,
+        @RequestParam(required = false) reportsToPositionId: Long?,
+        @RequestParam(required = false) assigned: Boolean?,
+        @RequestParam(required = false) vacant: Boolean?,
+        @RequestParam(defaultValue = "false") includeDeleted: Boolean
+    ) = ApiResponse.ok(service.list(page, size, sort, direction, search, companyId, departmentId,
+        status, reportsToPositionId, assigned, vacant, includeDeleted))
 
-@RestController
-@RequestMapping(value = ["/staff", "/records/staff"])
-class StaffController(private val service: OrganizationService) {
-    @GetMapping fun list(@RequestParam(defaultValue = "false") includeDeleted: Boolean) =
-        ApiResponse.ok(service.listStaff(includeDeleted))
-    @PostMapping @PreAuthorize(ORG_WRITE) fun create(@RequestBody request: StaffRequest) =
-        ApiResponse.ok(service.createStaff(request), "Staff created")
-    @PutMapping("/{id}") @PreAuthorize(ORG_WRITE) fun update(@PathVariable id: Long, @RequestBody request: StaffRequest) =
-        ApiResponse.ok(service.updateStaff(id, request), "Staff updated")
-    @DeleteMapping("/{id}") @PreAuthorize(ORG_WRITE) fun delete(@PathVariable id: Long): ApiResponse<Unit> {
-        service.deleteStaff(id); return ApiResponse.ok("Staff archived")
-    }
-    @PatchMapping("/{id}/restore") @PreAuthorize(ORG_WRITE) fun restore(@PathVariable id: Long) =
-        ApiResponse.ok(service.restoreStaff(id), "Staff restored")
-}
+    @GetMapping("/records/positions")
+    fun legacyList(@RequestParam(defaultValue = "false") includeDeleted: Boolean) = ApiResponse.ok(service.listLegacy(includeDeleted))
 
-@RestController
-@RequestMapping(value = ["/positions", "/records/positions"])
-class PositionController(private val service: OrganizationService) {
-    @GetMapping fun list(@RequestParam(defaultValue = "false") includeDeleted: Boolean) =
-        ApiResponse.ok(service.listPositions(includeDeleted))
-    @PostMapping @PreAuthorize(ORG_WRITE) fun create(@RequestBody request: PositionRequest) =
-        ApiResponse.ok(service.createPosition(request), "Position created")
-    @PutMapping("/{id}") @PreAuthorize(ORG_WRITE) fun update(@PathVariable id: Long, @RequestBody request: PositionRequest) =
-        ApiResponse.ok(service.updatePosition(id, request), "Position updated")
-    @DeleteMapping("/{id}") @PreAuthorize(ORG_WRITE) fun delete(@PathVariable id: Long): ApiResponse<Unit> {
-        service.deletePosition(id); return ApiResponse.ok("Position archived")
-    }
-    @PatchMapping("/{id}/restore") @PreAuthorize(ORG_WRITE) fun restore(@PathVariable id: Long) =
-        ApiResponse.ok(service.restorePosition(id), "Position restored")
+    @GetMapping(value = ["/positions/{id}", "/records/positions/{id}"])
+    fun get(@PathVariable id: Long) = ApiResponse.ok(service.get(id))
+
+    @PostMapping("/positions") @PreAuthorize(ORG_WRITE)
+    fun create(@Valid @RequestBody request: PositionCreateRequest) = ApiResponse.ok(service.create(request), "Position created")
+
+    @PostMapping("/records/positions") @PreAuthorize(ORG_WRITE)
+    fun createLegacy(@RequestBody request: PositionRequest) = ApiResponse.ok(service.createLegacy(request), "Position created")
+
+    @PutMapping("/positions/{id}") @PreAuthorize(ORG_WRITE)
+    fun update(@PathVariable id: Long, @Valid @RequestBody request: PositionUpdateRequest) =
+        ApiResponse.ok(service.update(id, request), "Position updated")
+
+    @PutMapping("/records/positions/{id}") @PreAuthorize(ORG_WRITE)
+    fun updateLegacy(@PathVariable id: Long, @RequestBody request: PositionRequest) =
+        ApiResponse.ok(service.updateLegacy(id, request), "Position updated")
+
+    @DeleteMapping(value = ["/positions/{id}", "/records/positions/{id}"]) @PreAuthorize(ORG_WRITE)
+    fun delete(@PathVariable id: Long): ApiResponse<Unit> { service.archive(id); return ApiResponse.ok("Position archived") }
+
+    @PatchMapping(value = ["/positions/{id}/restore", "/records/positions/{id}/restore"]) @PreAuthorize(ORG_WRITE)
+    fun restore(@PathVariable id: Long) = ApiResponse.ok(service.restore(id), "Position restored")
 }
