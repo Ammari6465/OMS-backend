@@ -62,6 +62,8 @@ class AiOrchestrationService(
         AiIntent.HELP -> help()
         AiIntent.REPORTING_HIERARCHY -> reportingHierarchy(query)
         AiIntent.MANAGER_OF -> managerOf(query)
+        AiIntent.CONTACT_INFO -> contactInfo(query)
+        AiIntent.PERSON_ATTRIBUTE -> personAttribute(query)
         AiIntent.DEPARTMENT_HEAD -> departmentHead(query)
         AiIntent.DEPARTMENT_STATS -> departmentStats()
         AiIntent.RECENT_HIRES -> joining(query)
@@ -104,6 +106,37 @@ class AiOrchestrationService(
         val answer = manager?.let { "${person.name} reports to ${it.name}${it.title?.let { t -> ", $t" } ?: ""}." }
             ?: "${person.name} has no manager assigned."
         return AiChatResponse("manager-of", answer, context, focusActions(manager ?: person), if (manager == null) "empty" else "normal")
+    }
+
+    private fun contactInfo(query: String): AiChatResponse {
+        val person = matchStaff(query, staff()) ?: return noPerson("contact_info")
+        val lines = buildList {
+            person.email?.let { add("Email: $it") }
+            person.cellNumber?.let { add("Mobile: $it") }
+            person.landline?.let { add("Landline: $it") }
+        }
+        val context = mapOf("name" to person.name, "email" to person.email, "mobile" to person.cellNumber, "landline" to person.landline)
+        return if (lines.isEmpty())
+            AiChatResponse("contact-info", "No contact details are on record for ${person.name}.", context, focusActions(person), "empty")
+        else AiChatResponse("contact-info",
+            "You can reach ${person.name}${person.title?.let { " ($it)" } ?: ""}:\n" + lines.joinToString("\n") { "• $it" },
+            context, focusActions(person))
+    }
+
+    private fun personAttribute(query: String): AiChatResponse {
+        val person = matchStaff(query, staff()) ?: return noPerson("person_attribute")
+        val dept = person.departmentName ?: "—"
+        val company = person.companyName
+        return if (Regex("\\b(department|team)\\b", RegexOption.IGNORE_CASE).containsMatchIn(query)) {
+            AiChatResponse("person-attribute", "${person.name} works in $dept, $company.",
+                mapOf("name" to person.name, "department" to dept, "company" to company), focusActions(person))
+        } else {
+            val answer = person.title?.let { "${person.name}'s position is $it — $dept, $company." }
+                ?: "${person.name} has no job title on record ($dept, $company)."
+            AiChatResponse("person-attribute", answer,
+                mapOf("name" to person.name, "title" to person.title, "department" to dept, "company" to company),
+                focusActions(person), if (person.title == null) "empty" else "normal")
+        }
     }
 
     private fun departmentHead(query: String): AiChatResponse {

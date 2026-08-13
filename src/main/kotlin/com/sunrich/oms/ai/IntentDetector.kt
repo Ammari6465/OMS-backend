@@ -6,6 +6,8 @@ import org.springframework.stereotype.Component
 enum class AiIntent {
     REPORTING_HIERARCHY,
     MANAGER_OF,
+    CONTACT_INFO,
+    PERSON_ATTRIBUTE,
     RECENT_HIRES,
     DEPARTMENT_STATS,
     DEPARTMENT_HEAD,
@@ -43,6 +45,8 @@ class IntentDetector {
                 !Regex("report\\s+(a|an|the)?\\s*(bug|issue)").containsMatchIn(q) -> AiIntent.REPORTING_HIERARCHY
 
             Regex("\\bmanager of\\b|\\bwho manages\\b|\\bboss of\\b|\\bwho.s the manager\\b").containsMatchIn(q) -> AiIntent.MANAGER_OF
+            Regex("\\bcontact\\b|\\be-?mail\\b|\\bphone\\b|\\bnumber\\b|\\breach\\b|\\bcall\\b|\\bmobile\\b|\\blandline\\b|\\bextension\\b|\\bget in touch\\b").containsMatchIn(q) -> AiIntent.CONTACT_INFO
+            Regex("\\bposition\\b|\\btitle\\b|\\brole\\b|\\bdesignation\\b|\\bwhat does .* do\\b|\\b(which|what)\\s+(department|team)\\b").containsMatchIn(q) -> AiIntent.PERSON_ATTRIBUTE
             Regex("\\bwho (heads|leads|runs)\\b|\\bhead of\\b|\\bdepartment head\\b").containsMatchIn(q) -> AiIntent.DEPARTMENT_HEAD
             Regex("\\bmost employees\\b|\\blargest department\\b|\\bheadcount\\b|\\bdepartment (stats|size|breakdown)\\b").containsMatchIn(q) -> AiIntent.DEPARTMENT_STATS
             Regex("\\bjoin(ed|ing|ers?)?\\b|\\brecent (hires?|staff|joiners?)\\b|\\bnew (hires?|joiners?|staff|employees?)\\b").containsMatchIn(q) -> AiIntent.RECENT_HIRES
