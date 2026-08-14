@@ -300,6 +300,46 @@ class TestDataSeeder {
                 isActive = true
             ),
             User(
+                username = "superadmin",
+                email = "superadmin@sunrichgroup.com",
+                passwordHash = passwordEncoder.encode("Admin@12345"),
+                role = Role.SUPER_ADMIN,
+                fullName = "System Administrator",
+                companyId = companyA.id,
+                status = EntityStatus.ACTIVE,
+                isActive = true
+            ),
+            User(
+                username = "admin",
+                email = "admin.legacy@sunrichgroup.com",
+                passwordHash = passwordEncoder.encode("admin123"),
+                role = Role.SUPER_ADMIN,
+                fullName = "Sunrich Administrator",
+                companyId = companyA.id,
+                status = EntityStatus.ACTIVE,
+                isActive = true
+            ),
+            User(
+                username = "manager",
+                email = "manager.legacy@sunrichgroup.com",
+                passwordHash = passwordEncoder.encode("manager123"),
+                role = Role.MANAGER,
+                fullName = "Sunrich Group Manager",
+                companyId = companyA.id,
+                status = EntityStatus.ACTIVE,
+                isActive = true
+            ),
+            User(
+                username = "viewer",
+                email = "viewer.legacy@sunrichgroup.com",
+                passwordHash = passwordEncoder.encode("viewer123"),
+                role = Role.READ_ONLY,
+                fullName = "Sunrich Analyst",
+                companyId = companyA.id,
+                status = EntityStatus.ACTIVE,
+                isActive = true
+            ),
+            User(
                 username = "viewer_guest",
                 email = "viewer@sunrichgroup.com",
                 passwordHash = passwordEncoder.encode("Viewer@12345"),
