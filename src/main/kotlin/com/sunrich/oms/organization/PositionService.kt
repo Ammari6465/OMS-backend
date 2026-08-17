@@ -248,10 +248,11 @@ class PositionService(
     private fun applyOccupancyState(entity: Position) {
         if (entity.staff != null) {
             if (entity.status == PositionStatus.CLOSED) throw BadRequestException("A closed position cannot have assigned staff")
+            if (entity.status == PositionStatus.ON_HOLD) throw BadRequestException("An on-hold position cannot have assigned staff")
             entity.isVacant = false
             entity.status = PositionStatus.FILLED
         } else {
-            entity.isVacant = entity.status != PositionStatus.CLOSED
+            entity.isVacant = entity.status == PositionStatus.OPEN
             if (entity.status == PositionStatus.FILLED) entity.status = PositionStatus.OPEN
         }
     }
@@ -277,7 +278,7 @@ class PositionService(
     private fun activeParent(id: Long, companyId: Long): Position = positions.findById(id)
         .orElseThrow { ResourceNotFoundException("Reporting position", id) }
         .also {
-            if (it.isDeleted || it.status == PositionStatus.CLOSED) throw BadRequestException("Reporting position must be active")
+            if (it.isDeleted || it.status == PositionStatus.CLOSED || it.status == PositionStatus.ON_HOLD) throw BadRequestException("Reporting position must be active")
             if (it.company.id != companyId) throw BadRequestException("Reporting position must belong to the selected company")
         }
 

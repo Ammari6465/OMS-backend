@@ -39,6 +39,7 @@ enum class EntityStatus {
 enum class PositionStatus {
     OPEN,
     FILLED,
+    ON_HOLD,
     CLOSED
 }
 
@@ -55,7 +56,12 @@ enum class AuditAction {
     LOGOUT,
     PASSWORD_CHANGE,
     PASSWORD_RESET,
-    IMPORT
+    IMPORT,
+    WORKFLOW_SUBMIT,
+    WORKFLOW_APPROVE,
+    WORKFLOW_REJECT,
+    WORKFLOW_EXECUTE,
+    WORKFLOW_CANCEL
 }
 
 /** Categories of notifications the system can emit. */
@@ -71,5 +77,16 @@ enum class NotificationType {
     REPORTING_LINE_CHANGE,
     VACANCY_OPENED,
     VACANCY_CLOSED,
+    WORKFLOW_SUBMITTED,
+    WORKFLOW_APPROVED,
+    WORKFLOW_REJECTED,
+    WORKFLOW_SCHEDULED,
+    WORKFLOW_COMPLETED,
+    WORKFLOW_FAILED,
+    POSITION_ON_HOLD,
+    POSITION_CLOSED,
+    USER_DEACTIVATED,
+    JOINER_ACTIVATED,
+    TRANSFER_COMPLETED,
     SYSTEM
 }

@@ -326,7 +326,7 @@ class StaffService(
 
     private fun validPosition(id: Long, entity: Staff, currentStaffId: Long?): Position {
         val position = positions.findById(id).orElseThrow { ResourceNotFoundException("Position", id) }
-        if (position.isDeleted || position.status == PositionStatus.CLOSED) throw BadRequestException("Position is not available")
+        if (position.isDeleted || position.status == PositionStatus.CLOSED || position.status == PositionStatus.ON_HOLD) throw BadRequestException("Position is not available")
         if (position.company.id != entity.company.id) throw BadRequestException("Position must belong to the selected company")
         if (position.department != null && position.department?.id != entity.department?.id) {
             throw BadRequestException("Position must belong to the selected department")
