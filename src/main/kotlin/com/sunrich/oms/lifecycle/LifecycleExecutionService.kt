@@ -6,6 +6,7 @@ import com.sunrich.oms.exception.*
 import com.sunrich.oms.organization.*
 import com.sunrich.oms.user.*
 import com.sunrich.oms.systemdata.AuditTrailService
+import com.sunrich.oms.workplace.WorkplaceService
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
@@ -18,7 +19,8 @@ class LifecycleExecutionService(
     private val workflows: LifecycleWorkflowRepository, private val executionLogs: LifecycleExecutionLogRepository,
     private val staff: StaffRepository, private val companies: CompanyRepository, private val departments: DepartmentRepository,
     private val positions: PositionRepository, private val users: UserRepository, private val encoder: PasswordEncoder,
-    private val mapper: ObjectMapper, private val clock: Clock, private val audit: AuditTrailService
+    private val mapper: ObjectMapper, private val clock: Clock, private val audit: AuditTrailService,
+    private val workplaces: WorkplaceService
 ) {
     @Transactional
     fun execute(id: Long): LifecycleWorkflow {
@@ -55,6 +57,8 @@ class LifecycleExecutionService(
         headed.forEach { it.headStaff = replacement }; departments.saveAll(headed); steps += "department ownership updated"
         positions.findAllByStaff_IdAndIsDeletedFalse(person.id!!).forEach { releasePosition(it, w.positionDisposition ?: PositionDisposition.OPEN) }
         steps += "position disposition applied"
+        workplaces.releaseForStaff(person.id!!, w.effectiveDate.minusDays(1), "Staff exit via ${w.workflowNumber}")
+        steps += "workplace assignment released"
         person.status = EntityStatus.INACTIVE; person.dateLeft = w.effectiveDate; staff.save(person); steps += "staff deactivated"
         users.findFirstByStaffIdAndIsDeletedFalse(person.id!!)?.let {
             it.isActive = false; it.status = EntityStatus.INACTIVE; it.passwordResetToken = null; it.passwordResetExpires = null

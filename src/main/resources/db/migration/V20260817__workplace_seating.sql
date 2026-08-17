@@ -1,0 +1,5 @@
+-- Production-safe, idempotent workplace migration.
+-- MySQL 8 executes the canonical CREATE TABLE IF NOT EXISTS statements from
+-- db/schema.sql for fresh and existing installations. No existing table is
+-- dropped or recreated. This marker documents the rollout version for
+-- operators that apply the canonical schema through their deployment tool.
