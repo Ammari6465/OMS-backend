@@ -145,9 +145,10 @@ class StaffService(
             status = request.status ?: EntityStatus.ACTIVE,
             photoUrl = request.photoUrl.clean()
         )
+        normalizeLifecycle(entity)
         validateStaff(entity, null)
         ensureUniqueEmployeeCode(companyId, entity.employeeCode, null)
-        val targetPosition = request.positionId?.let { validPosition(it, entity, null) }
+        val targetPosition = if (canOccupyPosition(entity)) request.positionId?.let { validPosition(it, entity, null) } else null
         val saved = staff.saveAndFlush(entity)
         synchronizePosition(saved, targetPosition)
         return toResponse(saved, targetPosition).also {
@@ -182,9 +183,10 @@ class StaffService(
         entity.status = request.status ?: EntityStatus.ACTIVE
         entity.photoUrl = request.photoUrl.clean()
 
+        normalizeLifecycle(entity)
         validateStaff(entity, id)
         ensureUniqueEmployeeCode(companyId, entity.employeeCode, id)
-        val targetPosition = request.positionId?.let { validPosition(it, entity, id) }
+        val targetPosition = if (canOccupyPosition(entity)) request.positionId?.let { validPosition(it, entity, id) } else null
         val saved = staff.saveAndFlush(entity)
         synchronizePosition(saved, targetPosition)
         val action = when {
@@ -277,12 +279,13 @@ class StaffService(
         request.dateLeft?.let { entity.dateLeft = it }
         request.status?.let { entity.status = it }
         request.photoUrl?.let { entity.photoUrl = it.clean() }
+        normalizeLifecycle(entity)
         validateStaff(entity, id)
         ensureUniqueEmployeeCode(entity.company.id!!, entity.employeeCode, id)
-        val targetPosition = request.positionId?.let { validPosition(it, entity, id) }
+        val targetPosition = if (canOccupyPosition(entity)) request.positionId?.let { validPosition(it, entity, id) } else null
         val saved = staff.saveAndFlush(entity)
-        if (request.positionId != null) synchronizePosition(saved, targetPosition)
-        val position = targetPosition ?: oldPosition
+        if (request.positionId != null || !canOccupyPosition(saved)) synchronizePosition(saved, targetPosition)
+        val position = if (canOccupyPosition(saved)) targetPosition ?: oldPosition else null
         val action = when {
             oldCompanyId != saved.company.id -> AuditAction.TRANSFER
             oldManagerId != saved.manager?.id -> AuditAction.REPARENT
@@ -345,6 +348,20 @@ class StaffService(
             throw BadRequestException("Date left cannot be before date joined")
         }
     }
+
+    /** Keeps departure state and position occupancy consistent. */
+    private fun normalizeLifecycle(entity: Staff) {
+        val today = LocalDate.now()
+        if (entity.dateLeft != null && !entity.dateLeft!!.isAfter(today)) {
+            entity.status = EntityStatus.INACTIVE
+        }
+        if (entity.status == EntityStatus.INACTIVE && entity.dateLeft == null) {
+            entity.dateLeft = today
+        }
+    }
+
+    private fun canOccupyPosition(entity: Staff): Boolean =
+        entity.status == EntityStatus.ACTIVE && (entity.dateLeft == null || entity.dateLeft!!.isAfter(LocalDate.now()))
 
     private fun ensureNoReportingCycle(staffId: Long?, manager: Staff?) {
         var current = manager

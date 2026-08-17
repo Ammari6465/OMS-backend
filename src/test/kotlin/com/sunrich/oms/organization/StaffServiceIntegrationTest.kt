@@ -194,6 +194,31 @@ class StaffServiceIntegrationTest {
     }
 
     @Test
+    fun `completed leaving date deactivates staff and opens their position`() {
+        val position = organizations.createPosition(PositionRequest(
+            companyId = companyA.id,
+            deptId = departmentA.id,
+            title = "Finance Lead",
+            status = PositionStatus.OPEN
+        ))
+        val employee = service.create(createRequest(
+            companyA.id, departmentA.id, "EMP31", "Departing Employee", positionId = position.id
+        ))
+
+        val departed = service.update(employee.id, updateRequest(employee).copy(
+            dateLeft = java.time.LocalDate.now().minusDays(1),
+            status = EntityStatus.ACTIVE
+        ))
+
+        assertThat(departed.status).isEqualTo(EntityStatus.INACTIVE)
+        assertThat(departed.positionId).isNull()
+        val vacancy = positions.findById(position.id).orElseThrow()
+        assertThat(vacancy.staff).isNull()
+        assertThat(vacancy.isVacant).isTrue()
+        assertThat(vacancy.status).isEqualTo(PositionStatus.OPEN)
+    }
+
+    @Test
     fun `position API cannot bypass staff department and occupancy rules`() {
         val employee = service.create(createRequest(companyA.id, departmentA.id, "EMP35", "Position Guard"))
         val first = organizations.createPosition(PositionRequest(
