@@ -186,21 +186,14 @@ class LegacyRecordMigrationService(
         if (settings.count() == 0L) records.of("settings").forEach { record ->
             val p = payload(record)
             val kind = p.text("kind") ?: return@forEach
+            if (kind != "notification-preferences") return@forEach
             @Suppress("UNCHECKED_CAST")
             val values = p["values"] as? Map<String, Boolean> ?: emptyMap()
             val entity = SystemSetting(kind)
-            if (kind == "notification-preferences") {
-                entity.onboarding = values["onboarding"]
-                entity.exits = values["exits"]
-                entity.transfers = values["transfers"]
-                entity.vacancies = values["vacancies"]
-            } else {
-                entity.superAdmin = values["SUPER_ADMIN"]
-                entity.companyAdmin = values["COMPANY_ADMIN"]
-                entity.manager = values["MANAGER"]
-                entity.staff = values["STAFF"]
-                entity.readOnly = values["READ_ONLY"]
-            }
+            entity.onboarding = values["onboarding"]
+            entity.exits = values["exits"]
+            entity.transfers = values["transfers"]
+            entity.vacancies = values["vacancies"]
             settings.save(entity.withDeleted(record))
         }
     }

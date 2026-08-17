@@ -117,14 +117,14 @@ class SystemSettingsIntegrationTest {
     @Test
     fun `create duplicate setting kind throws BadRequestException`() {
         val req1 = SettingRequest(
-            kind = "password-reset-roles",
-            values = mapOf("SUPER_ADMIN" to true, "COMPANY_ADMIN" to true, "MANAGER" to false)
+            kind = "notification-preferences",
+            values = mapOf("onboarding" to true)
         )
         service.createSetting(req1)
 
         val req2 = SettingRequest(
-            kind = "password-reset-roles",
-            values = mapOf("SUPER_ADMIN" to true)
+            kind = "notification-preferences",
+            values = mapOf("vacancies" to true)
         )
         assertThatThrownBy { service.createSetting(req2) }
             .isInstanceOf(BadRequestException::class.java)
@@ -140,6 +140,12 @@ class SystemSettingsIntegrationTest {
             header("Authorization", "Bearer $token")
             contentType = MediaType.APPLICATION_JSON
             content = "{\"kind\":\"notification-preferences\",\"values\":{\"onboarding\":true}}"
+        }.andExpect {
+            status { isForbidden() }
+        }
+
+        mockMvc.get("/settings") {
+            header("Authorization", "Bearer $token")
         }.andExpect {
             status { isForbidden() }
         }

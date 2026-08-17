@@ -15,6 +15,7 @@ class NotificationDeliveryService(
 ) {
     @Transactional
     fun deliver(recipient: User, type: NotificationType, message: String, link: String? = null, entityType: String? = null, entityId: Long? = null) {
+        if (!systemData.isNotificationEnabled(type)) return
         val userId = recipient.id ?: return
         val duplicate = repository.findFirstByRecipientIdAndTypeAndMessageOrderByCreatedAtDesc(userId, type, message)
         if (duplicate != null && duplicate.createdAt.isAfter(LocalDateTime.now().minusSeconds(3))) return

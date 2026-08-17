@@ -8,6 +8,8 @@ import com.sunrich.oms.exception.BadRequestException
 import com.sunrich.oms.security.UserPrincipal
 import com.sunrich.oms.systemdata.AuditLogRepository
 import com.sunrich.oms.systemdata.NotificationRepository
+import com.sunrich.oms.systemdata.SystemSetting
+import com.sunrich.oms.systemdata.SystemSettingRepository
 import com.sunrich.oms.user.User
 import com.sunrich.oms.user.UserRepository
 import org.assertj.core.api.Assertions.assertThat
@@ -34,6 +36,7 @@ class VacancyIntegrationTest {
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var audits: AuditLogRepository
     @Autowired lateinit var notifications: NotificationRepository
+    @Autowired lateinit var settings: SystemSettingRepository
     private lateinit var company: Company
     private lateinit var department: Department
 
@@ -68,6 +71,9 @@ class VacancyIntegrationTest {
 
     @Test
     fun `opening closing filling and reopening are audited and notify the actor`() {
+        val rules = settings.findByKind("notification-preferences") ?: SystemSetting("notification-preferences")
+        rules.vacancies = true
+        settings.saveAndFlush(rules)
         val vacancy = service.create(PositionCreateRequest(company.id, "Lifecycle Role", department.id, status = PositionStatus.OPEN))
         val closed = service.update(vacancy.id, update(vacancy, PositionStatus.CLOSED))
         val reopened = service.update(closed.id, update(closed, PositionStatus.OPEN))

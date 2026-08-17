@@ -76,7 +76,7 @@ class NotificationController(private val service: SystemDataService, private val
 @RestController
 @RequestMapping(value = ["/settings", "/records/settings"])
 class SystemSettingController(private val service: SystemDataService) {
-    @GetMapping fun list(@RequestParam(defaultValue = "false") includeDeleted: Boolean) =
+    @GetMapping @PreAuthorize("hasRole('SUPER_ADMIN')") fun list(@RequestParam(defaultValue = "false") includeDeleted: Boolean) =
         ApiResponse.ok(service.listSettings(includeDeleted))
     @PostMapping @PreAuthorize("hasRole('SUPER_ADMIN')") fun create(@RequestBody request: SettingRequest) =
         ApiResponse.ok(service.createSetting(request), "Setting created")

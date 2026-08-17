@@ -170,7 +170,33 @@ class SystemDataService(
         cb.and(*predicates.toTypedArray())
     }
 
-    @Transactional(readOnly = true) fun listSettings(includeDeleted: Boolean) = settings.findAll().filter { includeDeleted || !it.isDeleted }.map(::settingResponse)
+    @Transactional(readOnly = true)
+    fun listSettings(includeDeleted: Boolean) = settings.findAll()
+        .filter { it.kind == NOTIFICATION_SETTING_KIND }
+        .filter { includeDeleted || !it.isDeleted }
+        .map(::settingResponse)
+
+    /** Global event rules used by the trusted notification delivery path. */
+    @Transactional(readOnly = true)
+    fun isNotificationEnabled(type: NotificationType): Boolean {
+        val rules = settings.findByKind(NOTIFICATION_SETTING_KIND)
+        return when (type) {
+            NotificationType.STAFF_ONBOARDED -> rules?.onboarding ?: true
+            NotificationType.STAFF_EXITED -> rules?.exits ?: true
+            NotificationType.DEPARTMENT_CHANGE,
+            NotificationType.PROMOTION,
+            NotificationType.TITLE_CHANGE,
+            NotificationType.DEPARTMENT_TRANSFER,
+            NotificationType.COMPANY_TRANSFER,
+            NotificationType.REPORTING_LINE_CHANGE -> rules?.transfers ?: true
+            NotificationType.VACANCY_OPENED,
+            NotificationType.VACANCY_CLOSED -> rules?.vacancies ?: false
+            // Security and system messages must never be suppressed by a
+            // workforce preference.
+            NotificationType.COMPANY_ADDED,
+            NotificationType.SYSTEM -> true
+        }
+    }
     @Transactional fun createSetting(request: SettingRequest): SettingResponse {
         val kind = validateKind(request.kind); if (settings.findByKind(kind) != null) throw BadRequestException("Setting '$kind' already exists")
         val saved = settings.save(applyValues(SystemSetting(kind), request.values)); recordSettingAudit(saved, AuditAction.CREATE, null); return settingResponse(saved)
@@ -213,16 +239,16 @@ class SystemDataService(
     private fun redact(value: String?): String? { if (value == null) return null; var safe: String=value
         SENSITIVE_KEYS.forEach { key -> safe=safe.replace(Regex("(?i)($key\\s*[=:]\\s*)[^,;\\s}]+"), "$1[REDACTED]") }
         safe=safe.replace(Regex("(?i)Bearer\\s+[A-Za-z0-9._~-]+"), "Bearer [REDACTED]"); return safe.take(10_000) }
-    private fun applyValues(e:SystemSetting,v:Map<String,Boolean>):SystemSetting{if(e.kind=="notification-preferences"){v["onboarding"]?.let{e.onboarding=it};v["exits"]?.let{e.exits=it};v["transfers"]?.let{e.transfers=it};v["vacancies"]?.let{e.vacancies=it}}else{v["SUPER_ADMIN"]?.let{e.superAdmin=it};v["COMPANY_ADMIN"]?.let{e.companyAdmin=it};v["MANAGER"]?.let{e.manager=it};v["STAFF"]?.let{e.staff=it};v["READ_ONLY"]?.let{e.readOnly=it}};return e}
-    private fun validateKind(k:String?):String{val v=k?.trim()?:throw BadRequestException("kind is required");if(v !in setOf("notification-preferences","password-reset-roles"))throw BadRequestException("Unsupported setting kind: $v");return v}
+    private fun applyValues(e:SystemSetting,v:Map<String,Boolean>):SystemSetting{v["onboarding"]?.let{e.onboarding=it};v["exits"]?.let{e.exits=it};v["transfers"]?.let{e.transfers=it};v["vacancies"]?.let{e.vacancies=it};return e}
+    private fun validateKind(k:String?):String{val v=k?.trim()?:throw BadRequestException("kind is required");if(v != NOTIFICATION_SETTING_KIND)throw BadRequestException("Unsupported setting kind: $v");return v}
     private fun notificationResponse(e:Notification):NotificationResponse{val d=notificationDisplay(e.type);val m=notificationMeta(e.type);return NotificationResponse(e.id!!,e.type,d.first,e.message,d.second,d.third,m.category,m.priority,e.link,e.entityType,e.entityId,e.isRead,e.readAt,false,e.createdAt,e.createdAt)}
     fun toNotificationResponse(entity: Notification): NotificationResponse = notificationResponse(entity)
     private data class NotificationMeta(val category:String,val priority:String)
     private fun notificationMeta(t:NotificationType)=when(t){NotificationType.STAFF_EXITED,NotificationType.VACANCY_CLOSED->NotificationMeta("WORKFORCE","HIGH");NotificationType.SYSTEM->NotificationMeta("SYSTEM","NORMAL");NotificationType.VACANCY_OPENED->NotificationMeta("VACANCY","NORMAL");NotificationType.COMPANY_ADDED->NotificationMeta("ORGANIZATION","NORMAL");NotificationType.STAFF_ONBOARDED->NotificationMeta("WORKFORCE","NORMAL");else->NotificationMeta("ORGANIZATION","NORMAL")}
     private fun notificationDisplay(t:NotificationType)=when(t){NotificationType.STAFF_ONBOARDED->Triple("New staff onboarded","pi pi-user-plus","#34d399");NotificationType.STAFF_EXITED->Triple("Staff exited","pi pi-sign-out","#f87171");NotificationType.COMPANY_ADDED->Triple("Company registered","pi pi-building","#0f8bfd");NotificationType.VACANCY_OPENED->Triple("Vacancy opened","pi pi-inbox","#fbbf24");NotificationType.VACANCY_CLOSED->Triple("Vacancy closed","pi pi-check-circle","#34d399");NotificationType.DEPARTMENT_TRANSFER,NotificationType.DEPARTMENT_CHANGE->Triple("Department changed","pi pi-sitemap","#8b5cf6");NotificationType.COMPANY_TRANSFER->Triple("Company transfer","pi pi-building","#8b5cf6");NotificationType.PROMOTION,NotificationType.TITLE_CHANGE->Triple("Staff updated","pi pi-star","#fbbf24");NotificationType.REPORTING_LINE_CHANGE->Triple("Reporting line changed","pi pi-share-alt","#8b5cf6");NotificationType.SYSTEM->Triple("System notification","pi pi-bell","#0f8bfd")}
-    private fun settingResponse(e:SystemSetting)=SettingResponse(e.id!!,e.kind,if(e.kind=="notification-preferences")mapOf("onboarding" to(e.onboarding?:true),"exits" to(e.exits?:true),"transfers" to(e.transfers?:true),"vacancies" to(e.vacancies?:false))else mapOf("SUPER_ADMIN" to(e.superAdmin?:true),"COMPANY_ADMIN" to(e.companyAdmin?:true),"MANAGER" to(e.manager?:false),"STAFF" to(e.staff?:false),"READ_ONLY" to(e.readOnly?:false)),e.isDeleted,e.createdAt,e.updatedAt)
+    private fun settingResponse(e:SystemSetting)=SettingResponse(e.id!!,e.kind,mapOf("onboarding" to(e.onboarding?:true),"exits" to(e.exits?:true),"transfers" to(e.transfers?:true),"vacancies" to(e.vacancies?:false)),e.isDeleted,e.createdAt,e.updatedAt)
     private fun requiredText(v:String?,f:String)=v?.trim()?.takeIf{it.isNotEmpty()}?:throw BadRequestException("$f is required")
     private fun escapeLike(v:String)=v.replace("\\","\\\\").replace("%","\\%").replace("_","\\_")
     private fun csv(v:String?):String { var safe=(v?:"").replace("\r"," ").replace("\n"," ");if(safe.firstOrNull() in setOf('=','+','-','@','\t'))safe="'$safe";return "\"${safe.replace("\"","\"\"")}\"" }
-    companion object { private val SORT_FIELDS=mapOf("timestamp" to "changedAt","changedAt" to "changedAt","user" to "changedBy.fullName","action" to "changeType","module" to "entityType");private val SECURITY_ACTIONS=setOf(AuditAction.LOGIN,AuditAction.LOGIN_FAILED,AuditAction.LOGOUT,AuditAction.PASSWORD_CHANGE,AuditAction.PASSWORD_RESET);private val SENSITIVE_KEYS=listOf("password","passwordHash","password_hash","token","jwt","secret","apiKey","api_key","clientSecret","credential") }
+    companion object { private const val NOTIFICATION_SETTING_KIND="notification-preferences";private val SORT_FIELDS=mapOf("timestamp" to "changedAt","changedAt" to "changedAt","user" to "changedBy.fullName","action" to "changeType","module" to "entityType");private val SECURITY_ACTIONS=setOf(AuditAction.LOGIN,AuditAction.LOGIN_FAILED,AuditAction.LOGOUT,AuditAction.PASSWORD_CHANGE,AuditAction.PASSWORD_RESET);private val SENSITIVE_KEYS=listOf("password","passwordHash","password_hash","token","jwt","secret","apiKey","api_key","clientSecret","credential") }
 }
