@@ -266,7 +266,7 @@ CREATE TABLE IF NOT EXISTS workplace_zones (
 CREATE TABLE IF NOT EXISTS workplace_desks (
  desk_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, floor_id BIGINT UNSIGNED NOT NULL, zone_id BIGINT UNSIGNED, desk_code VARCHAR(80) NOT NULL, display_name VARCHAR(200), mode VARCHAR(20) NOT NULL, availability VARCHAR(20) NOT NULL,
  x DECIMAL(7,4) NOT NULL, y DECIMAL(7,4) NOT NULL, width DECIMAL(7,4) NOT NULL, height DECIMAL(7,4) NOT NULL, rotation INT NOT NULL DEFAULT 0, capacity INT NOT NULL DEFAULT 1,
- telephone_extension VARCHAR(30), accessible TINYINT(1) NOT NULL DEFAULT 0, equipment_tags VARCHAR(1000), notes VARCHAR(2000), status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+ telephone_extension VARCHAR(30), is_accessible TINYINT(1) NOT NULL DEFAULT 0, equipment_tags VARCHAR(1000), notes VARCHAR(2000), status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
  is_deleted TINYINT(1) NOT NULL DEFAULT 0, deleted_at DATETIME, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, created_by BIGINT UNSIGNED, updated_by BIGINT UNSIGNED, version BIGINT NOT NULL DEFAULT 0,
  PRIMARY KEY(desk_id), UNIQUE KEY uq_workplace_desk_floor_code(floor_id,desk_code), KEY idx_workplace_desk_floor(floor_id,is_deleted), KEY idx_workplace_desk_zone(zone_id), CONSTRAINT fk_workplace_desk_floor FOREIGN KEY(floor_id) REFERENCES workplace_floors(floor_id), CONSTRAINT fk_workplace_desk_zone FOREIGN KEY(zone_id) REFERENCES workplace_zones(zone_id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

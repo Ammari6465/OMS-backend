@@ -58,7 +58,7 @@ class Desk(
  @Column(nullable=false,precision=7,scale=4) var x:BigDecimal,@Column(nullable=false,precision=7,scale=4) var y:BigDecimal,
  @Column(nullable=false,precision=7,scale=4) var width:BigDecimal=BigDecimal("3"),@Column(nullable=false,precision=7,scale=4) var height:BigDecimal=BigDecimal("2"),
  @Column(nullable=false) var rotation:Int=0,@Column(nullable=false) var capacity:Int=1,
- @Column(name="telephone_extension",length=30) var telephoneExtension:String?=null,@Column(nullable=false) var accessible:Boolean=false,
+ @Column(name="telephone_extension",length=30) var telephoneExtension:String?=null,@Column(name="is_accessible",nullable=false) var accessible:Boolean=false,
  @Column(name="equipment_tags",length=1000) var equipmentTags:String?=null,@Column(length=2000) var notes:String?=null,
  @Enumerated(EnumType.STRING) @Column(nullable=false,length=20) var status:EntityStatus=EntityStatus.ACTIVE
 ):BaseEntity(){@Id @GeneratedValue(strategy=GenerationType.IDENTITY) @Column(name="desk_id") var id:Long?=null}
