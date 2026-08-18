@@ -21,7 +21,7 @@ class WorkplaceService(
  private val storage:FloorPlanStorage,private val audit:AuditTrailService,private val notifications:NotificationDeliveryService,private val clock:Clock,
  @Value("\${oms.workplace.hide-staff-names:false}")private val hideNames:Boolean
 ){
- fun listOffices(companyId:Long?,includeDeleted:Boolean=false)=scopedList(includeDeleted,offices::findAllScoped,offices::findCompanyScoped).filter{companyId==null||it.company.id==companyId}.map(::office)
+ fun listOffices(companyId:Long?,includeDeleted:Boolean=false):List<OfficeResponse>{val f=flags(includeDeleted);val cid=principalCompany()?:companyId;val list=if(cid==null)offices.findAllScoped(f) else offices.findCompanyScoped(cid,f);return list.filter{companyId==null||it.company.id==companyId}.map(::office)}
  fun listBuildings(officeId:Long?,includeDeleted:Boolean=false)=scopedList(includeDeleted,buildings::findAllScoped,buildings::findCompanyScoped).filter{officeId==null||it.office.id==officeId}.map(::building)
  fun listFloors(buildingId:Long?,includeDeleted:Boolean=false)=scopedList(includeDeleted,floors::findAllScoped,floors::findCompanyScoped).filter{buildingId==null||it.building.id==buildingId}.map(::floor)
  fun listZones(floorId:Long?,includeDeleted:Boolean=false)=(if(floorId!=null){ownedFloor(floorId);zones.findByFloor(floorId,flags(includeDeleted))}else scopedList(includeDeleted,zones::findAllScoped,zones::findCompanyScoped)).map(::zone)
