@@ -15,7 +15,6 @@ interface StaffRepository : JpaRepository<Staff, Long>, JpaSpecificationExecutor
     fun existsByCompany_IdAndEmployeeCodeIgnoreCase(companyId: Long, employeeCode: String): Boolean
     fun existsByCompany_IdAndEmployeeCodeIgnoreCaseAndIdNot(companyId: Long, employeeCode: String, id: Long): Boolean
     fun findAllByManager_IdAndIsDeletedFalse(managerId: Long): List<Staff>
-    fun countByCompany_IdAndIsDeletedFalseAndStatus(companyId: Long, status: com.sunrich.oms.common.enums.EntityStatus): Long
 }
 interface PositionRepository : JpaRepository<Position, Long>, JpaSpecificationExecutor<Position> {
     fun existsByDepartment_IdAndIsDeletedFalse(departmentId: Long): Boolean
