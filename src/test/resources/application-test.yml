@@ -14,6 +14,8 @@ spring:
   sql:
     init:
       mode: never          # do NOT run the MySQL-specific schema.sql on H2
+  flyway:
+    enabled: false         # production migrations contain MySQL-specific DDL
 
 # Deterministic security config for the auth tests
 oms:

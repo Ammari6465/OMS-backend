@@ -30,6 +30,11 @@ spring:
         order_updates: true
     show-sql: ${JPA_SHOW_SQL:false}
 
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 0
+
   jackson:
     default-property-inclusion: non_null
     serialization:

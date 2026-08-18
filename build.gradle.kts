@@ -41,6 +41,8 @@ dependencies {
     implementation("com.github.librepdf:openpdf:1.3.35")
 
     // Database
+    implementation("org.flywaydb:flyway-core")
+    runtimeOnly("org.flywaydb:flyway-mysql")
     runtimeOnly("com.mysql:mysql-connector-j")
 
     // Tests
