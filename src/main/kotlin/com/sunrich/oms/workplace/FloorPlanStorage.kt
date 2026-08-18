@@ -21,10 +21,11 @@ class FloorPlanStorage(
  fun store(file:MultipartFile):StoredPlan{
   if(file.isEmpty)throw BadRequestException("Floor plan file is empty");if(file.size>maxBytes)throw BadRequestException("Floor plan exceeds the configured size limit")
   val bytes=file.bytes;val detected=detect(bytes,file.contentType);val ext=when(detected){"image/png"->"png";"image/jpeg"->"jpg";else->"svg"}
+  val dimensions=if(detected=="image/svg+xml")svgDimensions(bytes)else rasterDimensions(bytes)
   val name="${UUID.randomUUID()}.$ext";val target=resolve(name);Files.write(target,bytes,StandardOpenOption.CREATE_NEW)
-  val dimensions=if(detected=="image/svg+xml")svgDimensions(bytes)else ImageIO.read(bytes.inputStream())?.let{it.width to it.height}
   return StoredPlan(name,(file.originalFilename?:"floor-plan.$ext").substringAfterLast('/').substringAfterLast('\\').take(255),detected,dimensions?.first,dimensions?.second)
  }
+ private fun rasterDimensions(bytes:ByteArray):Pair<Int,Int> = runCatching{ImageIO.read(bytes.inputStream())}.getOrNull()?.let{it.width to it.height} ?: throw BadRequestException("The floor plan image could not be read. Upload a valid PNG, JPEG, or SVG file")
  fun read(reference:String)=Files.readAllBytes(resolve(reference))
  fun delete(reference:String?){reference?.let{runCatching{Files.deleteIfExists(resolve(it))}}}
  private fun resolve(reference:String):Path{if(!reference.matches(Regex("^[a-f0-9-]{36}\\.(png|jpg|svg)$")))throw BadRequestException("Invalid floor plan reference");return root.resolve(reference).normalize().also{if(!it.startsWith(root))throw BadRequestException("Invalid floor plan reference")}}
