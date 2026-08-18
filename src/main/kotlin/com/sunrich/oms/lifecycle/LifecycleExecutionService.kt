@@ -57,7 +57,7 @@ class LifecycleExecutionService(
         headed.forEach { it.headStaff = replacement }; departments.saveAll(headed); steps += "department ownership updated"
         positions.findAllByStaff_IdAndIsDeletedFalse(person.id!!).forEach { releasePosition(it, w.positionDisposition ?: PositionDisposition.OPEN) }
         steps += "position disposition applied"
-        workplaces.releaseForStaff(person.id!!, w.effectiveDate.minusDays(1), "Staff exit via ${w.workflowNumber}")
+        workplaces.releaseForStaff(person.id!!, w.effectiveDate, "Staff exit via ${w.workflowNumber}")
         steps += "workplace assignment released"
         person.status = EntityStatus.INACTIVE; person.dateLeft = w.effectiveDate; staff.save(person); steps += "staff deactivated"
         users.findFirstByStaffIdAndIsDeletedFalse(person.id!!)?.let {
