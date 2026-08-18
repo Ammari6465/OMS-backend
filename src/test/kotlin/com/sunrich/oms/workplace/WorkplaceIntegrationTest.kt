@@ -14,6 +14,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.annotation.Propagation
 import java.math.BigDecimal
 import java.time.LocalDate
 
@@ -27,6 +28,7 @@ class WorkplaceIntegrationTest{
  @Test fun `coordinates duplicate codes and cross-company assignments are rejected`(){assertThatThrownBy{service.createDesk(deskRequest("OUTSIDE",99,10).copy(width=BigDecimal("5")))}.isInstanceOf(BadRequestException::class.java);assertThatThrownBy{service.createDesk(deskRequest("F3-027",30,10))}.isInstanceOf(ConflictException::class.java);assertThatThrownBy{service.assign(AssignmentRequest(desk,otherStaff,LocalDate.now()))}.isInstanceOf(BadRequestException::class.java)}
  @Test fun `prevents double assignment and retains transfer and release history`(){val first=service.assign(AssignmentRequest(desk,staffId,LocalDate.now(),reason="Initial"));assertThatThrownBy{service.assign(AssignmentRequest(desk2,staffId,LocalDate.now()))}.isInstanceOf(ConflictException::class.java);val moved=service.transfer(first.id,TransferRequest(desk2,LocalDate.now(),"Team move"));assertThat(moved.deskCode).isEqualTo("F3-028");assertThat(service.history(staffId)).hasSize(2);service.release(moved.id,ReleaseRequest(LocalDate.now(),"Released",moved.version));assertThat(service.currentForStaff(staffId)).isNull()}
  @Test fun `company admin cannot view another company floor`(){val scoped=users.save(User("scoped-${System.nanoTime()}","scoped-${System.nanoTime()}@example.com","hash",Role.COMPANY_ADMIN,"Scoped",companyId=otherCompany));auth(scoped);assertThatThrownBy{service.map(floor)}.isInstanceOf(ForbiddenException::class.java)}
+ @Test @Transactional(propagation=Propagation.NOT_SUPPORTED) fun `summary works without an open persistence session`(){service.assign(AssignmentRequest(desk,staffId,LocalDate.now(),reason="Permanent desk"));assertThat(service.summary(company)).isEqualTo(WorkplaceSummary(2,1,1,0,0,50.0))}
  private fun deskRequest(code:String,x:Int,y:Int)=DeskRequest(floor,code=code,x=BigDecimal(x),y=BigDecimal(y),width=BigDecimal("4"),height=BigDecimal("3"))
  private fun auth(u:User){val p=UserPrincipal(u.id!!,u.username,u.role,u.companyId);SecurityContextHolder.getContext().authentication=UsernamePasswordAuthenticationToken(p,null,listOf(SimpleGrantedAuthority(p.authority)))}
 }
