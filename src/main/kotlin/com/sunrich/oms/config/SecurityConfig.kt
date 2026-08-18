@@ -62,7 +62,6 @@ class SecurityConfig(
                         "/auth/forgot-password",
                         "/auth/reset-password",
                         "/ws/**",
-                        "/sse/**",
                         "/actuator/health",
                         "/actuator/health/**",
                         "/actuator/info",

@@ -17,7 +17,7 @@ class OrganogramRealtimeIntegrationTest {
     fun `subscribing to SSE registers emitter and updates subscriber count`() {
         val initialCount = publisher.subscriberCount()
 
-        val emitter = publisher.subscribe()
+        val emitter = publisher.subscribe(42L)
 
         assertThat(publisher.subscriberCount()).isEqualTo(initialCount + 1)
         assertThat(emitter).isNotNull
@@ -28,15 +28,15 @@ class OrganogramRealtimeIntegrationTest {
         val health = healthIndicator.health()
 
         assertThat(health.status).isEqualTo(Status.UP)
-        assertThat(health.details["stompDestination"]).isEqualTo("/topic/organogram")
+        assertThat(health.details["stompDestination"]).isEqualTo("/topic/organogram/{companyId}")
         assertThat(health.details).containsKey("sseSubscribers")
     }
 
     @Test
     fun `publishing event dispatches without throwing exceptions`() {
-        val emitter = publisher.subscribe()
+        val emitter = publisher.subscribe(42L)
 
-        publisher.publish("Department", "CREATE", 101L)
+        publisher.publish(42L, "DEPARTMENT", "CREATE", 101L, 1L)
 
         assertThat(publisher.subscriberCount()).isGreaterThanOrEqualTo(1)
     }

@@ -39,7 +39,7 @@ class OrganizationService(
             status = request.status ?: EntityStatus.ACTIVE
         ))
         recordCompanyAudit(AuditAction.CREATE, saved, null)
-        return companyResponse(saved).also { updates.publish("Company", "CREATE", it.id) }
+        return companyResponse(saved).also { updates.publish(it.id, "COMPANY", "CREATE", it.id, saved.version) }
     }
 
     @Transactional
@@ -54,14 +54,14 @@ class OrganizationService(
         request.status?.let { entity.status = it }
         val saved = companies.save(entity)
         recordCompanyAudit(AuditAction.UPDATE, saved, old)
-        return companyResponse(saved).also { updates.publish("Company", "UPDATE", it.id) }
+        return companyResponse(saved).also { updates.publish(it.id, "COMPANY", "UPDATE", it.id, saved.version) }
     }
 
     @Transactional
-    fun deleteCompany(id: Long): Company { val entity=company(id); val old=companyAuditValue(entity); val saved=companies.save(entity.apply { markDeleted() }); recordCompanyAudit(AuditAction.DELETE,saved,old); updates.publish("Company", "DELETE", id); return saved }
+    fun deleteCompany(id: Long): Company { val entity=company(id); val old=companyAuditValue(entity); val saved=companies.save(entity.apply { markDeleted() }); recordCompanyAudit(AuditAction.DELETE,saved,old); updates.publish(id, "COMPANY", "DELETE", id, saved.version); return saved }
 
     @Transactional
-    fun restoreCompany(id: Long): CompanyResponse { val saved=companies.save(company(id).apply { restore() });recordCompanyAudit(AuditAction.RESTORE,saved,null);return companyResponse(saved).also { updates.publish("Company", "RESTORE", id) } }
+    fun restoreCompany(id: Long): CompanyResponse { val saved=companies.save(company(id).apply { restore() });recordCompanyAudit(AuditAction.RESTORE,saved,null);return companyResponse(saved).also { updates.publish(id, "COMPANY", "RESTORE", id, saved.version) } }
 
     @Transactional(readOnly = true)
     fun listPositions(includeDeleted: Boolean) = positions.findAll()
@@ -79,7 +79,7 @@ class OrganizationService(
             status = request.status ?: PositionStatus.OPEN
         )
         validatePositionLinks(entity)
-        return positionResponse(positions.save(entity)).also { updates.publish("Position", "CREATE", it.id) }
+        return positionResponse(positions.save(entity)).also { updates.publish(it.companyId, "POSITION", "CREATE", it.id, it.version) }
     }
 
     @Transactional
@@ -93,16 +93,16 @@ class OrganizationService(
         entity.staff = request.staffId?.let(::staffMember)
         request.status?.let { entity.status = it }
         validatePositionLinks(entity)
-        return positionResponse(positions.save(entity)).also { updates.publish("Position", "UPDATE", it.id) }
+        return positionResponse(positions.save(entity)).also { updates.publish(it.companyId, "POSITION", "UPDATE", it.id, it.version) }
     }
 
     @Transactional
     fun deletePosition(id: Long) = positions.save(position(id).apply { markDeleted() })
-        .also { updates.publish("Position", "DELETE", id) }
+        .also { updates.publish(it.company.id!!, "POSITION", "DELETE", id, it.version) }
 
     @Transactional
     fun restorePosition(id: Long) = positionResponse(positions.save(position(id).apply { restore() }))
-        .also { updates.publish("Position", "RESTORE", id) }
+        .also { updates.publish(it.companyId, "POSITION", "RESTORE", id, it.version) }
 
     private fun company(id: Long) = companies.findById(id)
         .orElseThrow { ResourceNotFoundException("Company", id) }

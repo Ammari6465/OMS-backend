@@ -95,7 +95,7 @@ class DepartmentService(
         entity.headStaff = request.headStaffId?.let { linkedStaff(it, companyId) }
         return toResponse(departments.save(entity)).also {
             recordAudit(AuditAction.CREATE, entity, null)
-            updates.publish("Department", "CREATE", it.id)
+            updates.publish(it.companyId, "DEPARTMENT", "CREATE", it.id, it.version)
         }
     }
 
@@ -124,7 +124,7 @@ class DepartmentService(
         // the next client update must send back.
         return toResponse(departments.saveAndFlush(entity)).also {
             recordAudit(AuditAction.UPDATE, entity, previousValue)
-            updates.publish("Department", "UPDATE", it.id)
+            updates.publish(it.companyId, "DEPARTMENT", "UPDATE", it.id, it.version)
         }
     }
 
@@ -143,7 +143,7 @@ class DepartmentService(
         val previousValue = auditValue(entity)
         departments.save(entity.apply { markDeleted() })
         recordAudit(AuditAction.DELETE, entity, previousValue)
-        updates.publish("Department", "DELETE", id)
+        updates.publish(entity.company.id!!, "DEPARTMENT", "DELETE", id, entity.version)
     }
 
     @Transactional
@@ -152,7 +152,7 @@ class DepartmentService(
         ensureUnique(entity.company.id!!, entity.name, id)
         return toResponse(departments.save(entity.apply { restore() })).also {
             recordAudit(AuditAction.RESTORE, entity, null)
-            updates.publish("Department", "RESTORE", id)
+            updates.publish(it.companyId, "DEPARTMENT", "RESTORE", id, it.version)
         }
     }
 

@@ -153,7 +153,7 @@ class StaffService(
         synchronizePosition(saved, targetPosition)
         return toResponse(saved, targetPosition).also {
             recordAudit(AuditAction.CREATE, saved, null)
-            updates.publish("Staff", "CREATE", it.id)
+            updates.publish(it.companyId, "STAFF", "CREATE", it.id, it.version)
         }
     }
 
@@ -196,7 +196,7 @@ class StaffService(
         }
         return toResponse(saved, targetPosition).also {
             recordAudit(action, saved, oldValue)
-            updates.publish("Staff", "UPDATE", it.id)
+            updates.publish(it.companyId, "STAFF", "UPDATE", it.id, it.version)
         }
     }
 
@@ -215,7 +215,7 @@ class StaffService(
         if (entity.dateLeft == null) entity.dateLeft = LocalDate.now()
         staff.save(entity.apply { markDeleted() })
         recordAudit(AuditAction.DELETE, entity, oldValue)
-        updates.publish("Staff", "DELETE", id)
+        updates.publish(entity.company.id!!, "STAFF", "DELETE", id, entity.version)
     }
 
     @Transactional
@@ -231,7 +231,7 @@ class StaffService(
         val saved = staff.saveAndFlush(entity.apply { restore() })
         return toResponse(saved, null).also {
             recordAudit(AuditAction.RESTORE, saved, null)
-            updates.publish("Staff", "RESTORE", id)
+            updates.publish(it.companyId, "STAFF", "RESTORE", id, it.version)
         }
     }
 
@@ -293,7 +293,7 @@ class StaffService(
         }
         return toResponse(saved, position).also {
             recordAudit(action, saved, oldValue)
-            updates.publish("Staff", "UPDATE", it.id)
+            updates.publish(it.companyId, "STAFF", "UPDATE", it.id, it.version)
         }
     }
 

@@ -15,11 +15,13 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.time.LocalDate
+import com.sunrich.oms.organogram.ManagerChangeRequest
+import com.sunrich.oms.organogram.OrganogramService
 
 private const val STAFF_WRITE = "hasAnyRole('SUPER_ADMIN','COMPANY_ADMIN')"
 
 @RestController
-class StaffController(private val service: StaffService) {
+class StaffController(private val service: StaffService, private val organogram: OrganogramService) {
     @GetMapping("/staff")
     fun list(
         @RequestParam(defaultValue = "0") page: Int,
@@ -67,6 +69,11 @@ class StaffController(private val service: StaffService) {
     @PreAuthorize(STAFF_WRITE)
     fun updateLegacy(@PathVariable id: Long, @RequestBody request: StaffRequest) =
         ApiResponse.ok(service.updateLegacy(id, request), "Staff updated")
+
+    @PatchMapping("/staff/{id}/manager")
+    @PreAuthorize(STAFF_WRITE)
+    fun changeManager(@PathVariable id: Long, @Valid @RequestBody request: ManagerChangeRequest) =
+        ApiResponse.ok(organogram.changeManager(id, request), "Reporting line updated")
 
     @DeleteMapping(value = ["/staff/{id}", "/records/staff/{id}"])
     @PreAuthorize(STAFF_WRITE)

@@ -126,7 +126,7 @@ class PositionService(
         return toResponse(saved).also {
             recordAudit(AuditAction.CREATE, saved, null, if (saved.isVacant) "Vacancy" else "Position")
             if (saved.isVacant) notifyActor(NotificationType.VACANCY_OPENED, "${saved.title} vacancy was opened.")
-            updates.publish("Position", "CREATE", it.id)
+            updates.publish(it.companyId, "POSITION", "CREATE", it.id, it.version)
         }
     }
 
@@ -160,7 +160,7 @@ class PositionService(
                 val type = if (saved.status == PositionStatus.OPEN) NotificationType.VACANCY_OPENED else NotificationType.VACANCY_CLOSED
                 notifyActor(type, "${saved.title} vacancy is now ${saved.status.name.lowercase()}.")
             }
-            updates.publish("Position", "UPDATE", it.id)
+            updates.publish(it.companyId, "POSITION", "UPDATE", it.id, it.version)
         }
     }
 
@@ -175,7 +175,7 @@ class PositionService(
         entity.status = PositionStatus.CLOSED
         positions.save(entity.apply { markDeleted() })
         recordAudit(AuditAction.DELETE, entity, oldValue)
-        updates.publish("Position", "DELETE", id)
+        updates.publish(entity.company.id!!, "POSITION", "DELETE", id, entity.version)
     }
 
     @Transactional
@@ -190,7 +190,7 @@ class PositionService(
         val saved = positions.saveAndFlush(entity.apply { restore() })
         return toResponse(saved).also {
             recordAudit(AuditAction.RESTORE, saved, null)
-            updates.publish("Position", "RESTORE", id)
+            updates.publish(it.companyId, "POSITION", "RESTORE", id, it.version)
         }
     }
 
