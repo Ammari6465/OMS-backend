@@ -63,7 +63,8 @@ class NotificationController(private val service: SystemDataService, private val
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) to: java.time.LocalDateTime?) =
         ApiResponse.ok(service.listNotifications(page,size,search,type,category,priority,read,from,to))
     @GetMapping("/summary") fun summary() = ApiResponse.ok(service.notificationSummary())
-    @GetMapping("/stream", produces = [MediaType.TEXT_EVENT_STREAM_VALUE]) fun stream() = realtime.subscribe(com.sunrich.oms.security.SecurityUtils.currentUserId())
+    @GetMapping("/stream", produces = [MediaType.TEXT_EVENT_STREAM_VALUE]) fun stream(): ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.SseEmitter> =
+        ResponseEntity.ok().header("X-Accel-Buffering", "no").body(realtime.subscribe(com.sunrich.oms.security.SecurityUtils.currentUserId()))
     @GetMapping("/{id}") fun get(@PathVariable id: Long) = ApiResponse.ok(service.getNotification(id))
     @PatchMapping("/{id}/read") fun update(@PathVariable id: Long, @RequestBody request: NotificationRequest) =
         ApiResponse.ok(service.updateNotification(id, request), "Notification updated")
