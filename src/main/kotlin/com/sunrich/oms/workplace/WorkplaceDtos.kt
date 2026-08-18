@@ -11,7 +11,7 @@ data class BuildingRequest(val officeId:Long,@field:NotBlank val name:String,@fi
 data class FloorRequest(val buildingId:Long,@field:NotBlank val name:String,val displayOrder:Int=0,val status:EntityStatus=EntityStatus.ACTIVE,val version:Long?=null)
 data class ZoneRequest(val floorId:Long,@field:NotBlank val name:String,@field:NotBlank val code:String,@field:Pattern(regexp="^#[0-9A-Fa-f]{6}$")val colour:String="#64748b",val description:String?=null,val status:EntityStatus=EntityStatus.ACTIVE,val version:Long?=null)
 data class DeskRequest(val floorId:Long,val zoneId:Long?=null,@field:NotBlank val code:String,val displayName:String?=null,val mode:DeskMode=DeskMode.ASSIGNED,val availability:DeskAvailability=DeskAvailability.AVAILABLE,@field:DecimalMin("0")@field:DecimalMax("100")val x:BigDecimal,@field:DecimalMin("0")@field:DecimalMax("100")val y:BigDecimal,@field:DecimalMin("0.01")val width:BigDecimal,@field:DecimalMin("0.01")val height:BigDecimal,val rotation:Int=0,@field:Min(1)val capacity:Int=1,val telephoneExtension:String?=null,val accessible:Boolean=false,val equipmentTags:String?=null,val notes:String?=null,val status:EntityStatus=EntityStatus.ACTIVE,val version:Long?=null)
-data class DeskBatchRequest(val desks:List<DeskRequest>)
+data class DeskBatchRequest(val desks:List<DeskRequest>,val removedDeskIds:List<Long> = emptyList())
 data class AssignmentRequest(val deskId:Long,val staffId:Long,val effectiveFrom:LocalDate,val effectiveTo:LocalDate?=null,val primaryAssignment:Boolean=true,val reason:String?=null)
 data class TransferRequest(val targetDeskId:Long,val effectiveDate:LocalDate,val reason:String?=null)
 data class ReleaseRequest(val effectiveTo:LocalDate,val reason:String?=null,val version:Long)
@@ -23,3 +23,6 @@ data class AssignmentResponse(val id:Long,val version:Long,val deskId:Long,val d
 data class DeskResponse(val id:Long,val version:Long,val floorId:Long,val zoneId:Long?,val zoneName:String?,val code:String,val displayName:String?,val mode:DeskMode,val availability:DeskAvailability,val x:BigDecimal,val y:BigDecimal,val width:BigDecimal,val height:BigDecimal,val rotation:Int,val capacity:Int,val telephoneExtension:String?,val accessible:Boolean,val equipmentTags:String?,val notes:String?,val status:EntityStatus,val isDeleted:Boolean,val assignment:AssignmentResponse?=null)
 data class FloorMapResponse(val floor:FloorResponse,val planUrl:String?,val zones:List<ZoneResponse>,val desks:List<DeskResponse>)
 data class WorkplaceSummary(val totalDesks:Long,val assignedDesks:Long,val availableDesks:Long,val unavailableDesks:Long,val staffWithoutDesks:Long,val utilizationPercent:Double)
+data class WorkplaceSearchResult(val deskId:Long,val deskCode:String,val floorId:Long,val zoneName:String?,val staffId:Long?,val staffName:String?,val employeeCode:String?,val departmentName:String?,val positionTitle:String?,val telephoneExtension:String?,val availability:DeskAvailability,val matchedOn:String)
+/** Active assignments and position titles for one batch of desks. */
+internal data class MapContext(val byDesk:Map<Long,DeskAssignment>,val titles:Map<Long,String>)

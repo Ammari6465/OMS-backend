@@ -1,5 +1,6 @@
 package com.sunrich.oms.organization
 
+import com.sunrich.oms.common.enums.EntityStatus
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 
@@ -15,6 +16,7 @@ interface StaffRepository : JpaRepository<Staff, Long>, JpaSpecificationExecutor
     fun existsByCompany_IdAndEmployeeCodeIgnoreCase(companyId: Long, employeeCode: String): Boolean
     fun existsByCompany_IdAndEmployeeCodeIgnoreCaseAndIdNot(companyId: Long, employeeCode: String, id: Long): Boolean
     fun findAllByManager_IdAndIsDeletedFalse(managerId: Long): List<Staff>
+    fun countByCompany_IdAndStatusAndIsDeletedFalse(companyId: Long, status: EntityStatus): Long
 }
 interface PositionRepository : JpaRepository<Position, Long>, JpaSpecificationExecutor<Position> {
     fun existsByDepartment_IdAndIsDeletedFalse(departmentId: Long): Boolean
