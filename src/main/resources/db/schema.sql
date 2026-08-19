@@ -13,7 +13,8 @@ SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- ---------------------------------------------------------------------
--- companies : one row per company in the group
+-- companies : one row per company in the group. Self-referencing: the holding
+-- company has parent_company_id NULL, every sister concern points at it.
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS companies (
     company_id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -21,6 +22,7 @@ CREATE TABLE IF NOT EXISTS companies (
     logo_url              VARCHAR(500)    NULL,
     reg_number            VARCHAR(100)    NULL,
     head_office_location  VARCHAR(300)    NULL,
+    parent_company_id     BIGINT UNSIGNED NULL,
     date_established      DATE            NULL,
     status                VARCHAR(20)     NOT NULL DEFAULT 'ACTIVE',
     is_deleted            TINYINT(1)      NOT NULL DEFAULT 0,
@@ -34,7 +36,9 @@ CREATE TABLE IF NOT EXISTS companies (
     UNIQUE KEY uq_companies_reg_number (reg_number),
     KEY idx_companies_status (status),
     KEY idx_companies_is_deleted (is_deleted),
-    KEY idx_companies_name (name)
+    KEY idx_companies_name (name),
+    KEY idx_companies_parent (parent_company_id, is_deleted),
+    CONSTRAINT fk_companies_parent FOREIGN KEY (parent_company_id) REFERENCES companies (company_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------

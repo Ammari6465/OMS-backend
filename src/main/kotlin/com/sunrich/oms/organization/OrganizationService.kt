@@ -25,21 +25,44 @@ class OrganizationService(
     private val users: UserRepository
 ) {
     @Transactional(readOnly = true)
-    fun listCompanies(includeDeleted: Boolean) = companies.findAll()
-        .filter { includeDeleted || !it.isDeleted }.map(::companyResponse)
+    fun listCompanies(includeDeleted: Boolean): List<CompanyResponse> {
+        val all = companies.findAll()
+        val childCounts = all.filter { !it.isDeleted && it.parentCompany != null }
+            .groupingBy { it.parentCompany!!.id }.eachCount()
+        return all.filter { includeDeleted || !it.isDeleted }
+            .map { companyResponse(it, (childCounts[it.id] ?: 0).toLong()) }
+    }
+
+    /** The group as a tree: holding company first, sister concerns beneath it. */
+    @Transactional(readOnly = true)
+    fun companyGroupTree(includeDeleted: Boolean): List<CompanyGroupNode> {
+        val visible = companies.findAll().filter { includeDeleted || !it.isDeleted }
+        val childCounts = visible.filter { !it.isDeleted && it.parentCompany != null }
+            .groupingBy { it.parentCompany!!.id }.eachCount()
+        val byParent = visible.groupBy { it.parentCompany?.id }
+        fun build(company: Company): CompanyGroupNode = CompanyGroupNode(
+            companyResponse(company, (childCounts[company.id] ?: 0).toLong()),
+            byParent[company.id].orEmpty().sortedBy { it.name.lowercase() }.map(::build)
+        )
+        return byParent[null].orEmpty().sortedBy { it.name.lowercase() }.map(::build)
+    }
 
     @Transactional
-    fun createCompany(request: CompanyRequest): CompanyResponse { val saved = companies.save(
-        Company(
-            name = requiredText(request.name, "Company name"),
-            regNumber = request.regNumber.clean(),
-            headOffice = request.headOffice.clean(),
-            dateEstablished = request.dateEstablished,
-            logoUrl = request.logoUrl.clean(),
-            status = request.status ?: EntityStatus.ACTIVE
-        ))
+    fun createCompany(request: CompanyRequest): CompanyResponse {
+        val parent = resolveParentCompanyForCreate(request.parentCompanyId)
+        val saved = companies.save(
+            Company(
+                name = requiredText(request.name, "Company name"),
+                regNumber = request.regNumber.clean(),
+                headOffice = request.headOffice.clean(),
+                dateEstablished = request.dateEstablished,
+                logoUrl = request.logoUrl.clean(),
+                status = request.status ?: EntityStatus.ACTIVE,
+                parentCompany = parent
+            )
+        )
         recordCompanyAudit(AuditAction.CREATE, saved, null)
-        return companyResponse(saved).also { updates.publish(it.id, "COMPANY", "CREATE", it.id, saved.version) }
+        return companyResponse(saved, 0).also { updates.publish(it.id, "COMPANY", "CREATE", it.id, saved.version) }
     }
 
     @Transactional
@@ -52,16 +75,68 @@ class OrganizationService(
         entity.dateEstablished = request.dateEstablished
         entity.logoUrl = request.logoUrl.clean()
         request.status?.let { entity.status = it }
+        entity.parentCompany = resolveParentCompanyForUpdate(request.parentCompanyId, entity)
         val saved = companies.save(entity)
         recordCompanyAudit(AuditAction.UPDATE, saved, old)
         return companyResponse(saved).also { updates.publish(it.id, "COMPANY", "UPDATE", it.id, saved.version) }
     }
 
     @Transactional
-    fun deleteCompany(id: Long): Company { val entity=company(id); val old=companyAuditValue(entity); val saved=companies.save(entity.apply { markDeleted() }); recordCompanyAudit(AuditAction.DELETE,saved,old); updates.publish(id, "COMPANY", "DELETE", id, saved.version); return saved }
+    fun deleteCompany(id: Long): Company {
+        val entity = company(id)
+        if (companies.existsByParentCompany_IdAndIsDeletedFalse(id)) {
+            throw ConflictException("Archive or reassign the sister concerns of ${entity.name} first")
+        }
+        val old = companyAuditValue(entity)
+        val saved = companies.save(entity.apply { markDeleted() })
+        recordCompanyAudit(AuditAction.DELETE, saved, old)
+        updates.publish(id, "COMPANY", "DELETE", id, saved.version)
+        return saved
+    }
 
     @Transactional
-    fun restoreCompany(id: Long): CompanyResponse { val saved=companies.save(company(id).apply { restore() });recordCompanyAudit(AuditAction.RESTORE,saved,null);return companyResponse(saved).also { updates.publish(id, "COMPANY", "RESTORE", id, saved.version) } }
+    fun restoreCompany(id: Long): CompanyResponse {
+        val entity = company(id)
+        entity.parentCompany?.let {
+            if (it.isDeleted) throw ConflictException("Restore the parent company ${it.name} first")
+        }
+        val saved = companies.save(entity.apply { restore() })
+        recordCompanyAudit(AuditAction.RESTORE, saved, null)
+        return companyResponse(saved).also { updates.publish(id, "COMPANY", "RESTORE", id, saved.version) }
+    }
+
+    /**
+     * Resolves the holding company for a new company. Omitting the parent makes
+     * the company a sister concern of the existing group parent, so the group
+     * keeps a single company at the top; the very first company created becomes
+     * that group parent.
+     */
+    private fun resolveParentCompanyForCreate(parentCompanyId: Long?): Company? {
+        if (parentCompanyId == null) return companies.findFirstByParentCompanyIsNullAndIsDeletedFalseOrderByIdAsc()
+        return resolveParentCompany(parentCompanyId, null)
+    }
+
+    /**
+     * Resolves a requested re-parent for [target]. Passing no parent leaves the
+     * current one untouched — a company is never silently detached from the
+     * group, since that would create a second root. Self-parenting and cycles
+     * are rejected.
+     */
+    private fun resolveParentCompanyForUpdate(parentCompanyId: Long?, target: Company): Company? =
+        if (parentCompanyId == null) target.parentCompany else resolveParentCompany(parentCompanyId, target)
+
+    private fun resolveParentCompany(parentCompanyId: Long, target: Company?): Company {
+        val parent = companies.findById(parentCompanyId)
+            .orElseThrow { ResourceNotFoundException("Company", parentCompanyId) }
+        if (parent.isDeleted) throw BadRequestException("Parent company ${parent.name} is archived")
+        if (target?.id != null && parent.id == target.id) {
+            throw BadRequestException("A company cannot be its own parent")
+        }
+        if (parent.parentCompany != null) {
+            throw BadRequestException("Sister concerns must belong directly to the group holding company")
+        }
+        return parent
+    }
 
     @Transactional(readOnly = true)
     fun listPositions(includeDeleted: Boolean) = positions.findAll()
@@ -139,9 +214,16 @@ class OrganizationService(
         }
     }
 
-    private fun companyResponse(e: Company) = CompanyResponse(
+    private fun companyResponse(e: Company) =
+        companyResponse(e, companies.countByParentCompany_IdAndIsDeletedFalse(e.id!!))
+
+    private fun companyResponse(e: Company, sisterConcernCount: Long) = CompanyResponse(
         e.id!!, e.name, e.regNumber, e.headOffice, e.dateEstablished, e.logoUrl,
-        e.status, e.isDeleted, e.createdAt, e.updatedAt
+        e.status, e.isDeleted, e.createdAt, e.updatedAt,
+        parentCompanyId = e.parentCompany?.id,
+        parentCompanyName = e.parentCompany?.name,
+        isGroupParent = e.isGroupParent,
+        sisterConcernCount = sisterConcernCount
     )
 
     private fun positionResponse(e: Position) = PositionResponse(
@@ -167,5 +249,6 @@ class OrganizationService(
         audits.save(AuditLog(changedBy=actor,changeType=action,fieldName="Company",entityType="Company",
             entityId=company.id,companyId=company.id,oldValue=old,newValue=companyAuditValue(company)))
     }
-    private fun companyAuditValue(company: Company) = "id=${company.id},name=${company.name},status=${company.status},deleted=${company.isDeleted}"
+    private fun companyAuditValue(company: Company) = "id=${company.id},name=${company.name},status=${company.status}," +
+        "parent=${company.parentCompany?.id},deleted=${company.isDeleted}"
 }

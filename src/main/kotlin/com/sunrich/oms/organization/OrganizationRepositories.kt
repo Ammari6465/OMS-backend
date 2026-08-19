@@ -5,7 +5,14 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import org.springframework.data.jpa.repository.EntityGraph
 
-interface CompanyRepository : JpaRepository<Company, Long>
+interface CompanyRepository : JpaRepository<Company, Long> {
+    fun findFirstByNameIgnoreCaseAndIsDeletedFalse(name: String): Company?
+    fun findFirstByParentCompanyIsNullAndIsDeletedFalseOrderByIdAsc(): Company?
+    fun findAllByParentCompanyIsNullAndIsDeletedFalse(): List<Company>
+    fun findAllByParentCompany_IdAndIsDeletedFalse(parentCompanyId: Long): List<Company>
+    fun existsByParentCompany_IdAndIsDeletedFalse(parentCompanyId: Long): Boolean
+    fun countByParentCompany_IdAndIsDeletedFalse(parentCompanyId: Long): Long
+}
 interface DepartmentRepository : JpaRepository<Department, Long>, JpaSpecificationExecutor<Department> {
     @EntityGraph(attributePaths = ["company", "headStaff"])
     fun findAllByCompany_IdAndIsDeletedFalse(companyId: Long): List<Department>

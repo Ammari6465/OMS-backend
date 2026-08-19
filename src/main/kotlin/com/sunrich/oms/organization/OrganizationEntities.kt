@@ -23,7 +23,10 @@ import java.time.LocalDate
 @Entity
 @Table(
     name = "companies",
-    indexes = [Index(name = "idx_companies_status", columnList = "status,is_deleted")]
+    indexes = [
+        Index(name = "idx_companies_status", columnList = "status,is_deleted"),
+        Index(name = "idx_companies_parent", columnList = "parent_company_id,is_deleted")
+    ]
 )
 class Company(
     @Column(nullable = false, length = 200)
@@ -43,12 +46,24 @@ class Company(
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    var status: EntityStatus = EntityStatus.ACTIVE
+    var status: EntityStatus = EntityStatus.ACTIVE,
+
+    /**
+     * Group hierarchy. The holding company ("Sunrich Companies") has no parent;
+     * every sister concern points at it. Self-referencing so the group can nest
+     * further without a second table.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_company_id", foreignKey = ForeignKey(name = "fk_companies_parent"))
+    var parentCompany: Company? = null
 ) : BaseEntity() {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "company_id")
     var id: Long? = null
+
+    /** A company with no parent is the group holding company. */
+    val isGroupParent: Boolean get() = parentCompany == null
 }
 
 @Entity

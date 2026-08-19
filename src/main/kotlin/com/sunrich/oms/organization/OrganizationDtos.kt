@@ -18,7 +18,12 @@ data class CompanyRequest(
     val headOffice: String? = null,
     val dateEstablished: LocalDate? = null,
     val logoUrl: String? = null,
-    val status: EntityStatus? = null
+    val status: EntityStatus? = null,
+    /**
+     * Holding company this sister concern belongs to. Null means "group parent";
+     * only one company in the group may sit at the top.
+     */
+    val parentCompanyId: Long? = null
 )
 
 data class CompanyResponse(
@@ -31,7 +36,17 @@ data class CompanyResponse(
     val status: EntityStatus,
     val isDeleted: Boolean,
     val createdAt: LocalDateTime?,
-    val updatedAt: LocalDateTime?
+    val updatedAt: LocalDateTime?,
+    val parentCompanyId: Long?,
+    val parentCompanyName: String?,
+    val isGroupParent: Boolean,
+    val sisterConcernCount: Long
+)
+
+/** One node of the group tree: the holding company and its sister concerns. */
+data class CompanyGroupNode(
+    val company: CompanyResponse,
+    val sisterConcerns: List<CompanyGroupNode>
 )
 
 data class DepartmentCreateRequest(

@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.boot.ApplicationRunner
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.context.annotation.Profile
+import org.springframework.core.annotation.Order
 import org.springframework.security.crypto.password.PasswordEncoder
 import java.time.LocalDate
 
@@ -32,6 +32,7 @@ class TestDataSeeder {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @Bean
+    @Order(2)
     fun seedComprehensiveTestData(
         companyRepository: CompanyRepository,
         departmentRepository: DepartmentRepository,
@@ -42,35 +43,18 @@ class TestDataSeeder {
     ): ApplicationRunner = ApplicationRunner {
         log.info("Checking system database state for testing data initialization...")
 
-        // 1. Seed Companies
-        val allCompanies = companyRepository.findAll()
-        var companyA = allCompanies.firstOrNull { it.name == "Sunrich Global Enterprises" }
-        if (companyA == null) {
-            companyA = companyRepository.save(
+        // 1. Companies come from CompanyGroupSeeder (the real group structure).
+        // Demo departments, staff and positions hang off the holding company.
+        val companyA = companyRepository.findFirstByNameIgnoreCaseAndIsDeletedFalse(CompanyGroupSeeder.GROUP_PARENT_NAME)
+            ?: companyRepository.save(
                 Company(
-                    name = "Sunrich Global Enterprises",
-                    regNumber = "REG-1001",
-                    headOffice = "100 Innovation Way, Tech Park, NY",
+                    name = CompanyGroupSeeder.GROUP_PARENT_NAME,
+                    regNumber = "SRG-000",
+                    headOffice = "Colombo, Sri Lanka",
                     dateEstablished = LocalDate.of(2010, 1, 15),
                     status = EntityStatus.ACTIVE
                 )
-            )
-            log.info("Seeded primary company: {}", companyA.name)
-        }
-
-        var companyB = allCompanies.firstOrNull { it.name == "Sunrich Logistics & Supply Chain" }
-        if (companyB == null) {
-            companyB = companyRepository.save(
-                Company(
-                    name = "Sunrich Logistics & Supply Chain",
-                    regNumber = "REG-1002",
-                    headOffice = "45 Logistics Harbor, London, UK",
-                    dateEstablished = LocalDate.of(2018, 6, 1),
-                    status = EntityStatus.ACTIVE
-                )
-            )
-            log.info("Seeded subsidiary company: {}", companyB.name)
-        }
+            ).also { log.info("Seeded group holding company: {}", it.name) }
 
         // 2. Seed Departments
         val allDepts = departmentRepository.findAll().filter { it.company.id == companyA.id && !it.isDeleted }

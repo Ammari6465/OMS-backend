@@ -22,6 +22,8 @@ private const val ORG_WRITE = "hasAnyRole('SUPER_ADMIN','COMPANY_ADMIN')"
 class CompanyController(private val service: OrganizationService) {
     @GetMapping fun list(@RequestParam(defaultValue = "false") includeDeleted: Boolean) =
         ApiResponse.ok(service.listCompanies(includeDeleted))
+    @GetMapping("/group") fun group(@RequestParam(defaultValue = "false") includeDeleted: Boolean) =
+        ApiResponse.ok(service.companyGroupTree(includeDeleted))
     @PostMapping @PreAuthorize(ORG_WRITE) fun create(@RequestBody request: CompanyRequest) =
         ApiResponse.ok(service.createCompany(request), "Company created")
     @PutMapping("/{id}") @PreAuthorize(ORG_WRITE) fun update(@PathVariable id: Long, @RequestBody request: CompanyRequest) =

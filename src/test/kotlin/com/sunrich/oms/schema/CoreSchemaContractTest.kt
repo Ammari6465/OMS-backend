@@ -25,7 +25,7 @@ class CoreSchemaContractTest {
                 }
             }
 
-            assertColumns(columnsByTable, "companies", "company_id", "name", "logo_url", "reg_number", "created_at")
+            assertColumns(columnsByTable, "companies", "company_id", "name", "logo_url", "reg_number", "parent_company_id", "created_at")
             assertColumns(columnsByTable, "departments", "dept_id", "company_id", "name", "parent_dept_id", "head_staff_id")
             assertColumns(
                 columnsByTable,
@@ -56,6 +56,7 @@ class CoreSchemaContractTest {
             }
 
             assertForeignKey(metadata, connection.catalog, "departments", "company_id", "companies", "company_id")
+            assertForeignKey(metadata, connection.catalog, "companies", "parent_company_id", "companies", "company_id")
             assertForeignKey(metadata, connection.catalog, "departments", "parent_dept_id", "departments", "dept_id")
             assertForeignKey(metadata, connection.catalog, "departments", "head_staff_id", "staff", "staff_id")
             assertForeignKey(metadata, connection.catalog, "staff", "company_id", "companies", "company_id")

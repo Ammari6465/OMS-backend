@@ -3,6 +3,7 @@ package com.sunrich.oms.organization
 import com.sunrich.oms.common.enums.EntityStatus
 import com.sunrich.oms.common.enums.Role
 import com.sunrich.oms.exception.BadRequestException
+import com.sunrich.oms.exception.ConflictException
 import com.sunrich.oms.exception.ResourceNotFoundException
 import com.sunrich.oms.security.UserPrincipal
 import org.assertj.core.api.Assertions.assertThat
@@ -117,6 +118,55 @@ class CompanyIntegrationTest {
 
         val restoredResponse = service.restoreCompany(company.id)
         assertThat(restoredResponse.isDeleted).isFalse()
+    }
+
+    @Test
+    fun `new company joins the group under the existing holding company`() {
+        val root = service.listCompanies(includeDeleted = false).single { it.isGroupParent }
+
+        val sister = service.createCompany(CompanyRequest(name = "Sunrich Tiles Annex"))
+
+        assertThat(sister.isGroupParent).isFalse()
+        assertThat(sister.parentCompanyId).isEqualTo(root.id)
+        assertThat(sister.parentCompanyName).isEqualTo(root.name)
+    }
+
+    @Test
+    fun `company cannot be nested under another sister concern`() {
+        val parent = service.createCompany(CompanyRequest(name = "Holding Branch"))
+        val child = service.createCompany(CompanyRequest(name = "Branch Subsidiary"))
+
+        assertThatThrownBy {
+            service.updateCompany(child.id, CompanyRequest(name = "Branch Subsidiary", parentCompanyId = parent.id))
+        }.isInstanceOf(BadRequestException::class.java)
+            .hasMessage("Sister concerns must belong directly to the group holding company")
+    }
+
+    @Test
+    fun `company cannot be its own parent`() {
+        val company = service.createCompany(CompanyRequest(name = "Self Referencing Corp"))
+
+        assertThatThrownBy { service.updateCompany(company.id, CompanyRequest(parentCompanyId = company.id)) }
+            .isInstanceOf(BadRequestException::class.java)
+            .hasMessage("A company cannot be its own parent")
+    }
+
+    @Test
+    fun `archiving a company with sister concerns is rejected`() {
+        val parent = service.listCompanies(includeDeleted = false).single { it.isGroupParent }
+
+        assertThatThrownBy { service.deleteCompany(parent.id) }
+            .isInstanceOf(ConflictException::class.java)
+    }
+
+    @Test
+    fun `group tree nests sister concerns under the holding company`() {
+        val sister = service.createCompany(CompanyRequest(name = "Tree Sister Concern"))
+
+        val roots = service.companyGroupTree(includeDeleted = false)
+
+        assertThat(roots).hasSize(1)
+        assertThat(roots.single().sisterConcerns.map { it.company.id }).contains(sister.id)
     }
 
     @Test
