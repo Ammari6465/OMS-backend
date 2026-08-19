@@ -92,7 +92,9 @@ class Notification(
     var recipient: User,
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 40)
+    // Keep this extensible. A native MySQL ENUM turns every new notification
+    // category into a production schema outage until its value is migrated.
+    @Column(nullable = false, length = 64, columnDefinition = "varchar(64)")
     var type: NotificationType,
 
     @Column(nullable = false, length = 1000)

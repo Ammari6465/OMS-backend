@@ -133,6 +133,7 @@ class WorkplaceRulesTest{
   service.uploadPlan(floor,png)
   assertThat(service.map(floor).planUrl).isEqualTo("/workplaces/floors/$floor/plan")
   assertThat(service.plan(floor).second).isEqualTo("image/png")
+  assertThat(notifications.findAll().filter{it.recipient.id==admin.id}.map{it.type}).contains(NotificationType.FLOOR_PLAN_REPLACED)
   assertThatThrownBy{service.uploadPlan(floor,MockMultipartFile("file","evil.svg","image/svg+xml","<svg onload=\"x()\"></svg>".toByteArray()))}
    .isInstanceOf(BadRequestException::class.java)
   val truncated=MockMultipartFile("file","broken.png","image/png",byteArrayOf(0x89.toByte(),0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a)+ByteArray(16))

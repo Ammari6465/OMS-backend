@@ -10,6 +10,8 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.multipart.MultipartFile
 import java.math.BigDecimal
 import java.time.*
@@ -40,7 +42,7 @@ class WorkplaceService(
  @Transactional fun batch(floorId:Long,r:DeskBatchRequest):List<DeskResponse>{ownedFloor(floorId);val existing=desks.findAllByFloor_IdAndIsDeletedFalseOrderByCode(floorId).associateBy{it.code.uppercase()};r.removedDeskIds.distinct().forEach{archiveDesk(ownedDesk(it).also{d->if(d.floor.id!=floorId)cross()})};r.desks.forEach{if(it.floorId!=floorId)throw BadRequestException("All desks must belong to the selected floor")};r.desks.forEach{req->val match=existing[req.code.trim().uppercase()];if(match==null)createDesk(req) else updateDesk(match.id!!,req.copy(version=match.version))};val saved=desks.findByFloor(floorId,flags(false));val ctx=assignmentContext(saved);return saved.map{desk(it,ctx)}}
 
  fun map(floorId:Long):FloorMapResponse{val f=ownedFloor(floorId);val list=desks.findByFloor(floorId,flags(false));val ctx=assignmentContext(list);return FloorMapResponse(floor(f),f.planStorageRef?.let{"/workplaces/floors/$floorId/plan"},zones.findAllByFloor_IdAndIsDeletedFalseOrderByName(floorId).map(::zone),list.map{desk(it,ctx)})}
- @Transactional fun uploadPlan(floorId:Long,file:MultipartFile):FloorResponse{val f=ownedFloor(floorId);val old=f.planStorageRef;val saved=storage.store(file);f.planStorageRef=saved.reference;f.planOriginalName=saved.originalName;f.planMediaType=saved.mediaType;f.planWidth=saved.width;f.planHeight=saved.height;val out=floors.saveAndFlush(f);storage.delete(old);record(company(f),"Floor",floorId,AuditAction.UPDATE,old?.let{"plan=present"},"plan=${saved.mediaType},name=${saved.originalName}");notifyActor(NotificationType.FLOOR_PLAN_REPLACED,"Floor plan updated for ${f.name}","/workplaces/floors/$floorId/map",floorId);return floor(out)}
+ @Transactional fun uploadPlan(floorId:Long,file:MultipartFile):FloorResponse{val f=ownedFloor(floorId);val old=f.planStorageRef;val saved=storage.store(file);managePlanFiles(saved.reference,old);f.planStorageRef=saved.reference;f.planOriginalName=saved.originalName;f.planMediaType=saved.mediaType;f.planWidth=saved.width;f.planHeight=saved.height;val out=floors.saveAndFlush(f);record(company(f),"Floor",floorId,AuditAction.UPDATE,old?.let{"plan=present"},"plan=${saved.mediaType},name=${saved.originalName}");notifyActor(NotificationType.FLOOR_PLAN_REPLACED,"Floor plan updated for ${f.name}","/workplaces/floors/$floorId/map",floorId);return floor(out)}
  fun plan(floorId:Long):Triple<ByteArray,String,String>{val f=ownedFloor(floorId);val ref=f.planStorageRef?:throw ResourceNotFoundException("Floor plan");return Triple(storage.read(ref),f.planMediaType?:"application/octet-stream",f.planOriginalName?:"floor-plan")}
  @Transactional fun removePlan(floorId:Long){val f=ownedFloor(floorId);val old=f.planStorageRef?:return;f.planStorageRef=null;f.planOriginalName=null;f.planMediaType=null;f.planWidth=null;f.planHeight=null;floors.save(f);storage.delete(old);record(company(f),"Floor",floorId,AuditAction.UPDATE,"plan=present","plan=removed")}
 
@@ -69,6 +71,13 @@ class WorkplaceService(
  private fun ownedAssignment(id:Long)=assignments.findById(id).filter{!it.isDeleted}.orElseThrow{ResourceNotFoundException("Desk assignment",id)}.also{scope(company(it.desk))}
  private fun scope(companyId:Long){val p=SecurityUtils.currentPrincipal();if(p.role!=Role.SUPER_ADMIN&&p.companyId!=companyId)throw ForbiddenException()};private fun companyAllowed(id:Long)=SecurityUtils.currentPrincipal().let{it.role==Role.SUPER_ADMIN||it.companyId==id};private fun scopedCompany(requested:Long?):Long{val p=SecurityUtils.currentPrincipal();return if(p.role==Role.SUPER_ADMIN)requested?:throw BadRequestException("companyId is required")else p.companyId?:throw ForbiddenException()}
  private fun actor()=users.findById(SecurityUtils.currentUserId()).orElseThrow{ResourceNotFoundException("Authenticated user")};private fun record(companyId:Long,type:String,id:Long?,action:AuditAction,before:String?,after:String?)=audit.record(actor(),action,type,id,companyId,type,before,after);private fun notifyActor(type:NotificationType,message:String,link:String,id:Long?)=notifications.deliver(actor(),type,message,link,"Workplace",id)
+ private fun managePlanFiles(newReference:String,oldReference:String?){
+  if(!TransactionSynchronizationManager.isSynchronizationActive()){storage.delete(oldReference);return}
+  TransactionSynchronizationManager.registerSynchronization(object:TransactionSynchronization{
+   override fun afterCommit(){storage.delete(oldReference)}
+   override fun afterCompletion(status:Int){if(status!=TransactionSynchronization.STATUS_COMMITTED)storage.delete(newReference)}
+  })
+ }
  private fun recordFromKind(kind:String,id:Long,action:AuditAction)=record(when(kind){"offices"->offices.findById(id).get().company.id!!;"buildings"->company(buildings.findById(id).get());"floors"->company(floors.findById(id).get());"zones"->company(zones.findById(id).get().floor);else->company(desks.findById(id).get())},kind,id,action,null,"id=$id")
  private fun company(b:Building)=b.office.company.id!!;private fun company(f:Floor)=f.building.office.company.id!!;private fun company(d:Desk)=company(d.floor);private fun company(o:Office)=o.company.id!!
  private fun office(e:Office)=OfficeResponse(e.id!!,e.version,e.company.id!!,e.company.name,e.name,e.code,e.address,e.city,e.country,e.timeZone,e.status,e.isDeleted)

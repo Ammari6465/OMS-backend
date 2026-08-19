@@ -49,6 +49,12 @@ class CoreSchemaContractTest {
             assertThat(columnsByTable.getValue("notifications")).doesNotContain("notification_id", "title", "icon", "color")
             assertThat(columnsByTable.getValue("audit_log")).doesNotContain("is_deleted", "updated_at", "version")
 
+            metadata.getColumns(connection.catalog, null, "NOTIFICATIONS", "TYPE").use { rows ->
+                assertThat(rows.next()).isTrue()
+                assertThat(rows.getString("TYPE_NAME").uppercase()).contains("CHAR")
+                assertThat(rows.getInt("COLUMN_SIZE")).isGreaterThanOrEqualTo(64)
+            }
+
             assertForeignKey(metadata, connection.catalog, "departments", "company_id", "companies", "company_id")
             assertForeignKey(metadata, connection.catalog, "departments", "parent_dept_id", "departments", "dept_id")
             assertForeignKey(metadata, connection.catalog, "departments", "head_staff_id", "staff", "staff_id")
