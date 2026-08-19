@@ -15,6 +15,9 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import org.springframework.web.HttpRequestMethodNotSupportedException
+import org.springframework.web.multipart.MaxUploadSizeExceededException
+import org.springframework.web.multipart.MultipartException
+
 
 /**
  * Centralised translation of exceptions into consistent [ErrorResponse] bodies.
@@ -75,8 +78,17 @@ class GlobalExceptionHandler {
     fun handleAuthentication(ex: AuthenticationException, req: HttpServletRequest): ResponseEntity<ErrorResponse> =
         build(HttpStatus.UNAUTHORIZED, ex.message ?: "Authentication required", req)
 
+    @ExceptionHandler(MaxUploadSizeExceededException::class)
+    fun handleMaxUploadSize(ex: MaxUploadSizeExceededException, req: HttpServletRequest): ResponseEntity<ErrorResponse> =
+        build(HttpStatus.BAD_REQUEST, "File exceeds the maximum allowed upload size (10MB)", req)
+
+    @ExceptionHandler(MultipartException::class)
+    fun handleMultipart(ex: MultipartException, req: HttpServletRequest): ResponseEntity<ErrorResponse> =
+        build(HttpStatus.BAD_REQUEST, ex.message ?: "Failed to process uploaded file", req)
+
     @ExceptionHandler(Exception::class)
     fun handleGeneric(ex: Exception, req: HttpServletRequest): ResponseEntity<ErrorResponse> {
+
         log.error("Unhandled exception on {} {}", req.method, req.requestURI, ex)
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred", req)
     }

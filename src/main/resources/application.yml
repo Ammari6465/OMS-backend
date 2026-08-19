@@ -35,10 +35,17 @@ spring:
     baseline-on-migrate: true
     baseline-version: 0
 
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: ${WORKPLACE_MAX_PLAN_BYTES:10MB}
+      max-request-size: ${WORKPLACE_MAX_PLAN_BYTES:10MB}
+
   jackson:
     default-property-inclusion: non_null
     serialization:
       write-dates-as-timestamps: false
+
 
 server:
   # Railway provides PORT; SERVER_PORT remains available for other hosts/local use.

@@ -25,7 +25,7 @@ class WorkplaceController(private val service:WorkplaceService){
  @PutMapping("/floors/{id}") @PreAuthorize(MANAGE) fun updateFloor(@PathVariable id:Long,@Valid @RequestBody r:FloorRequest)=ApiResponse.ok(service.updateFloor(id,r),"Floor updated")
  @GetMapping("/floors/{id}/map") fun map(@PathVariable id:Long)=ApiResponse.ok(service.map(id))
  @GetMapping("/floors/{id}/search") fun search(@PathVariable id:Long,@RequestParam q:String)=ApiResponse.ok(service.searchFloor(id,q))
- @PostMapping("/floors/{id}/plan",consumes=[MediaType.MULTIPART_FORM_DATA_VALUE]) @PreAuthorize(MANAGE) fun upload(@PathVariable id:Long,@RequestPart("file")file:MultipartFile)=ApiResponse.ok(service.uploadPlan(id,file),"Floor plan uploaded")
+ @PostMapping("/floors/{id}/plan",consumes=[MediaType.MULTIPART_FORM_DATA_VALUE]) @PreAuthorize(MANAGE) fun upload(@PathVariable id:Long,@RequestParam("file")file:MultipartFile)=ApiResponse.ok(service.uploadPlan(id,file),"Floor plan uploaded")
  @GetMapping("/floors/{id}/plan") fun plan(@PathVariable id:Long):ResponseEntity<ByteArray>{val(bytes,type,name)=service.plan(id);return ResponseEntity.ok().contentType(MediaType.parseMediaType(type)).header(HttpHeaders.CONTENT_DISPOSITION,"inline; filename=\"${name.replace("\"","")}\"").header(HttpHeaders.CACHE_CONTROL,"private, max-age=300").body(bytes)}
  @DeleteMapping("/floors/{id}/plan") @PreAuthorize(MANAGE) fun removePlan(@PathVariable id:Long):ApiResponse<Unit>{service.removePlan(id);return ApiResponse.ok("Floor plan removed")}
  @GetMapping("/zones") fun zones(@RequestParam(required=false)floorId:Long?,@RequestParam(defaultValue="false")includeDeleted:Boolean)=ApiResponse.ok(service.listZones(floorId,includeDeleted))
