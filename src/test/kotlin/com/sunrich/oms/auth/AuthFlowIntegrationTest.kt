@@ -129,24 +129,25 @@ class AuthFlowIntegrationTest {
     }
 
     @Test
-    fun `the bootstrap super admin is seeded and can sign in`() {
+    fun `the chairman is the seeded super admin and can sign in`() {
         // Other full-context auth tests intentionally clear the shared test database.
         // Re-establish the bootstrap fixture so this regression check is order-independent.
-        val bootstrap = userRepository.findByUsernameIgnoreCase("superadmin").orElseGet {
+        val bootstrap = userRepository.findByUsernameIgnoreCase("chairman").orElseGet {
             userRepository.save(User(
-                username = "superadmin", email = "superadmin@oms.local",
-                passwordHash = passwordEncoder.encode("Admin@12345"), role = Role.SUPER_ADMIN,
-                fullName = "System Administrator", status = EntityStatus.ACTIVE, isActive = true
+                username = "chairman", email = "chairman@sunrichgroup.com",
+                passwordHash = passwordEncoder.encode("Chairman@2026!"), role = Role.SUPER_ADMIN,
+                fullName = "Arjun Wijesinghe", status = EntityStatus.ACTIVE, isActive = true
             ))
         }
-        bootstrap.passwordHash = passwordEncoder.encode("Admin@12345")
+        bootstrap.passwordHash = passwordEncoder.encode("Chairman@2026!")
         bootstrap.role = Role.SUPER_ADMIN
         bootstrap.status = EntityStatus.ACTIVE
         bootstrap.isActive = true
+        bootstrap.restore()
         bootstrap.failedLoginAttempts = 0
         bootstrap.lockedUntil = null
         userRepository.saveAndFlush(bootstrap)
-        val response = authService.login(LoginRequest("superadmin", "Admin@12345"))
+        val response = authService.login(LoginRequest("chairman", "Chairman@2026!"))
 
         assertEquals(Role.SUPER_ADMIN, response.user.role)
         assertTrue(response.token.isNotBlank())

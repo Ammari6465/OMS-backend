@@ -97,10 +97,16 @@ oms:
   bootstrap:
     # Default super admin created on first startup if no users exist
     super-admin:
-      username: ${SUPER_ADMIN_USERNAME:admin_sunrich}
-      email: ${SUPER_ADMIN_EMAIL:admin@sunrichgroup.com}
-      password: ${SUPER_ADMIN_PASSWORD:Admin@12345}
-      full-name: ${SUPER_ADMIN_NAME:Sunrich Administrator}
+      username: ${SUPER_ADMIN_USERNAME:chairman}
+      email: ${SUPER_ADMIN_EMAIL:chairman@sunrichgroup.com}
+      password: "${SUPER_ADMIN_PASSWORD:Chairman@2026!}"
+      full-name: ${SUPER_ADMIN_NAME:Arjun Wijesinghe}
+    group-users:
+      chairman-password: "${CHAIRMAN_INITIAL_PASSWORD:Chairman@2026!}"
+      company-admin-password: "${COMPANY_ADMIN_INITIAL_PASSWORD:CompanyAdmin@2026!}"
+      manager-password: "${MANAGER_INITIAL_PASSWORD:Manager@2026!}"
+      staff-password: "${STAFF_INITIAL_PASSWORD:Staff@2026!}"
+      read-only-password: "${READ_ONLY_INITIAL_PASSWORD:Viewer@2026!}"
   frontend:
     base-url: ${FRONTEND_BASE_URL:http://localhost:4200}
   gmail:

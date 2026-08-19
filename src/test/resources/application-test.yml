@@ -30,7 +30,7 @@ oms:
       token-ttl-minutes: 30
   bootstrap:
     super-admin:
-      username: superadmin
-      email: superadmin@sunrichgroup.com
-      password: Admin@12345
-      full-name: System Administrator
+      username: chairman
+      email: chairman@sunrichgroup.com
+      password: Chairman@2026!
+      full-name: Arjun Wijesinghe

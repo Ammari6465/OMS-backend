@@ -30,7 +30,9 @@ class DataInitializer(
     @Order(0)
     fun seedSuperAdmin(userRepository: UserRepository, passwordEncoder: PasswordEncoder): ApplicationRunner =
         ApplicationRunner {
-            if (userRepository.existsByUsernameIgnoreCaseAndIsDeletedFalse(username)) return@ApplicationRunner
+            // Bootstrap only a genuinely empty database. GroupUserSeeder replaces
+            // this emergency account with the single configured Chairman login.
+            if (userRepository.count() > 0) return@ApplicationRunner
 
             val admin = User(
                 username = username,

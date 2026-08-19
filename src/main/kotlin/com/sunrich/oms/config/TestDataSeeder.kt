@@ -3,7 +3,6 @@ package com.sunrich.oms.config
 import com.sunrich.oms.common.enums.EmploymentType
 import com.sunrich.oms.common.enums.EntityStatus
 import com.sunrich.oms.common.enums.PositionStatus
-import com.sunrich.oms.common.enums.Role
 import com.sunrich.oms.organization.Company
 import com.sunrich.oms.organization.CompanyRepository
 import com.sunrich.oms.organization.Department
@@ -12,19 +11,16 @@ import com.sunrich.oms.organization.Position
 import com.sunrich.oms.organization.PositionRepository
 import com.sunrich.oms.organization.Staff
 import com.sunrich.oms.organization.StaffRepository
-import com.sunrich.oms.user.User
-import com.sunrich.oms.user.UserRepository
 import org.slf4j.LoggerFactory
 import org.springframework.boot.ApplicationRunner
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.annotation.Order
-import org.springframework.security.crypto.password.PasswordEncoder
 import java.time.LocalDate
 
 /**
  * Seeds comprehensive demo and testing data across all application modules:
- * Companies, Departments, Staff Members, Positions, Vacancies, and User Accounts.
+ * Companies, Departments, Staff Members, Positions, and Vacancies.
  */
 @Configuration
 class TestDataSeeder {
@@ -37,9 +33,7 @@ class TestDataSeeder {
         companyRepository: CompanyRepository,
         departmentRepository: DepartmentRepository,
         staffRepository: StaffRepository,
-        positionRepository: PositionRepository,
-        userRepository: UserRepository,
-        passwordEncoder: PasswordEncoder
+        positionRepository: PositionRepository
     ): ApplicationRunner = ApplicationRunner {
         log.info("Checking system database state for testing data initialization...")
 
@@ -236,111 +230,6 @@ class TestDataSeeder {
                     status = PositionStatus.OPEN
                 )
             )
-        }
-
-        // 5. Seed Test Users
-        val testUsers = listOf(
-            User(
-                username = "admin_sunrich",
-                email = "admin@sunrichgroup.com",
-                passwordHash = passwordEncoder.encode("Admin@12345"),
-                role = Role.COMPANY_ADMIN,
-                fullName = "Sunrich Admin",
-                companyId = companyA.id,
-                status = EntityStatus.ACTIVE,
-                isActive = true
-            ),
-            User(
-                username = "hr_manager",
-                email = "hr@sunrichgroup.com",
-                passwordHash = passwordEncoder.encode("Hr@12345"),
-                role = Role.MANAGER,
-                fullName = "Sophia Al-Mansoor",
-                companyId = companyA.id,
-                staffId = hrHeadStaff.id,
-                status = EntityStatus.ACTIVE,
-                isActive = true
-            ),
-            User(
-                username = "dept_manager",
-                email = "deptmanager@sunrichgroup.com",
-                passwordHash = passwordEncoder.encode("Dept@12345"),
-                role = Role.MANAGER,
-                fullName = "Marcus Brody",
-                companyId = companyA.id,
-                staffId = vpEngStaff.id,
-                status = EntityStatus.ACTIVE,
-                isActive = true
-            ),
-            User(
-                username = "staff_john",
-                email = "henry@sunrichgroup.com",
-                passwordHash = passwordEncoder.encode("Staff@12345"),
-                role = Role.STAFF,
-                fullName = "Dr. Henry Jones",
-                companyId = companyA.id,
-                staffId = leadArchStaff.id,
-                status = EntityStatus.ACTIVE,
-                isActive = true
-            ),
-            User(
-                username = "superadmin",
-                email = "superadmin@sunrichgroup.com",
-                passwordHash = passwordEncoder.encode("Admin@12345"),
-                role = Role.SUPER_ADMIN,
-                fullName = "System Administrator",
-                companyId = companyA.id,
-                status = EntityStatus.ACTIVE,
-                isActive = true
-            ),
-            User(
-                username = "admin",
-                email = "admin.legacy@sunrichgroup.com",
-                passwordHash = passwordEncoder.encode("admin123"),
-                role = Role.SUPER_ADMIN,
-                fullName = "Sunrich Administrator",
-                companyId = companyA.id,
-                status = EntityStatus.ACTIVE,
-                isActive = true
-            ),
-            User(
-                username = "manager",
-                email = "manager.legacy@sunrichgroup.com",
-                passwordHash = passwordEncoder.encode("manager123"),
-                role = Role.MANAGER,
-                fullName = "Sunrich Group Manager",
-                companyId = companyA.id,
-                status = EntityStatus.ACTIVE,
-                isActive = true
-            ),
-            User(
-                username = "viewer",
-                email = "viewer.legacy@sunrichgroup.com",
-                passwordHash = passwordEncoder.encode("viewer123"),
-                role = Role.READ_ONLY,
-                fullName = "Sunrich Analyst",
-                companyId = companyA.id,
-                status = EntityStatus.ACTIVE,
-                isActive = true
-            ),
-            User(
-                username = "viewer_guest",
-                email = "viewer@sunrichgroup.com",
-                passwordHash = passwordEncoder.encode("Viewer@12345"),
-                role = Role.READ_ONLY,
-                fullName = "Guest Auditor",
-                companyId = companyA.id,
-                status = EntityStatus.ACTIVE,
-                isActive = true
-            )
-        )
-
-        var seededUsersCount = 0
-        for (u in testUsers) {
-            if (!userRepository.existsByUsernameIgnoreCaseAndIsDeletedFalse(u.username)) {
-                userRepository.save(u)
-                seededUsersCount++
-            }
         }
 
         log.info("Comprehensive test data seeding completed successfully!")
