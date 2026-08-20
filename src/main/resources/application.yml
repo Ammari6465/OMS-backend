@@ -89,6 +89,9 @@ oms:
       model: ${WORKPLACE_DETECTION_MODEL:claude-sonnet-5}
       api-style: ${WORKPLACE_DETECTION_API_STYLE:anthropic}
       max-objects: ${WORKPLACE_DETECTION_MAX_OBJECTS:400}
+      # Strip evacuation-map decoration (background, arrows, icons, legend)
+      # before detection. Disable for clean CAD exports drawn in colour.
+      preprocess: ${WORKPLACE_DETECTION_PREPROCESS:true}
     max-plan-bytes: ${WORKPLACE_MAX_PLAN_BYTES:10485760}
     hide-staff-names: ${WORKPLACE_HIDE_STAFF_NAMES:false}
   cors:

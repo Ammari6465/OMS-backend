@@ -25,7 +25,13 @@ data class DetectionProperties(
     var apiStyle: String = "anthropic",
     /** Hard ceiling on regions accepted from one response. */
     var maxObjects: Int = 400,
-    var timeoutSeconds: Long = 120
+    var timeoutSeconds: Long = 120,
+    /**
+     * Strip decorative layers before detection. Worth keeping on for evacuation
+     * maps and other annotated plans; turn off for a clean CAD export where the
+     * drawing itself is coloured.
+     */
+    var preprocess: Boolean = true
 )
 
 /**
@@ -39,7 +45,8 @@ data class DetectionProperties(
 class VisionFloorPlanDetector(
     private val props: DetectionProperties,
     restClientBuilder: RestClient.Builder,
-    private val mapper: ObjectMapper
+    private val mapper: ObjectMapper,
+    private val preprocessor: FloorPlanPreprocessor = FloorPlanPreprocessor()
 ) : FloorPlanDetector {
 
     private val log = LoggerFactory.getLogger(javaClass)
@@ -55,8 +62,12 @@ class VisionFloorPlanDetector(
             log.warn("Floor plan media type {} cannot be sent to the vision model", image.mediaType)
             return emptyList()
         }
+        // Strip evacuation decoration first. Coordinates are unaffected: the
+        // cleaned image keeps the original aspect ratio and orientation, and
+        // results are normalised, so overlays land on the plan as uploaded.
+        val prepared = if (props.preprocess) preprocessor.clean(image) ?: image else image
         return try {
-            val content = request(image)
+            val content = request(prepared)
             parse(content).take(props.maxObjects)
         } catch (ex: Exception) {
             log.warn("Floor plan detection failed for {}", image.originalName, ex)
@@ -160,7 +171,9 @@ class VisionFloorPlanDetector(
         val SUPPORTED_IMAGE_TYPES = setOf("image/png", "image/jpeg")
 
         val PROMPT = """
-            You are analysing an office floor plan. Identify every distinct space and workstation.
+            You are analysing an office floor plan, which may be an evacuation map
+            with the decorative layer already stripped out. Identify every distinct
+            space and workstation from the architecture and the furniture.
 
             Return ONLY a JSON array. Each element must be:
             {
@@ -179,11 +192,25 @@ class VisionFloorPlanDetector(
             - Emit one DESK per individual seat, including each seat of back-to-back
               rows, bench runs and cubicle clusters. Do not merge a row into one desk.
             - Use the printed label to choose the type when there is one. Otherwise
-              infer it: a large table ringed by chairs is a CONFERENCE_ROOM, a single
-              executive desk in an enclosed room is a CABIN, and an area of many
-              workstations is a ZONE.
-            - Mark circulation space as WALKWAY and marked egress points as EXIT.
-            - Trace walls for enclosed rooms. A simple rectangle is fine for a desk.
+              infer it from the furniture:
+                * large table ringed by chairs -> CONFERENCE_ROOM (smaller, 4-6
+                  chairs, still enclosed -> MEETING_ROOM)
+                * enclosed room with one executive desk and one or two visitor
+                  chairs -> CABIN
+                * dense grid of workstations -> ZONE, plus one DESK per seat
+                * large curved desk with nearby waiting seating -> RECEPTION
+                * toilet and basin fixtures -> WASHROOM, one per enclosed cubicle
+                  space rather than one for the whole block
+                * counters and utility fittings -> PANTRY
+            - Mark circulation space and corridors as WALKWAY, following the
+              corridor exactly as drawn. Marked egress points are EXIT.
+            - Trace the walls for enclosed rooms so the polygon follows the real
+              boundary. A simple rectangle is fine for a desk.
+            - Ignore anything that is not building fabric: title text, logos,
+              legends, compass roses, "you are here" markers, egress arrows, and
+              fire equipment symbols. They are wayfinding, not architecture.
+            - Report only what you can actually see. Omit a region rather than
+              guessing at one; a person will add anything you miss.
             - No commentary, no markdown, JSON array only.
         """.trimIndent()
     }
