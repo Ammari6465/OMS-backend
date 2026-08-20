@@ -19,11 +19,24 @@ class DetectionConfig {
         props: DetectionProperties,
         restClientBuilder: RestClient.Builder,
         mapper: ObjectMapper
-    ): FloorPlanDetector = when {
-        !props.provider.equals("vision", ignoreCase = true) ->
-            UnavailableDetector("oms.workplace.detection.provider is '${props.provider}'")
-        props.apiKey.isBlank() ->
-            UnavailableDetector("oms.workplace.detection.api-key is not set")
-        else -> VisionFloorPlanDetector(props, restClientBuilder, mapper)
+    ): FloorPlanDetector {
+        val heuristic = HeuristicSvgFloorPlanDetector()
+        val vision = if (props.provider.equals("vision", ignoreCase = true) && props.apiKey.isNotBlank()) {
+            VisionFloorPlanDetector(props, restClientBuilder, mapper)
+        } else null
+
+        return object : FloorPlanDetector {
+            override val name: String get() = vision?.name ?: heuristic.name
+            override val available: Boolean get() = true
+
+            override fun detect(image: PlanImage): List<DetectionCandidate> {
+                if (image.mediaType == "image/svg+xml" || String(image.bytes, Charsets.UTF_8).contains("<svg", ignoreCase = true)) {
+                    val heuristicResults = heuristic.detect(image)
+                    if (heuristicResults.isNotEmpty()) return heuristicResults
+                }
+                return vision?.detect(image) ?: heuristic.detect(image)
+            }
+        }
     }
 }
+
