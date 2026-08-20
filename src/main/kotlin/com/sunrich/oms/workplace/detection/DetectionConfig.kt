@@ -10,10 +10,16 @@ import org.springframework.web.client.RestClient
  * Selects the active detection engine. The seam is deliberately a single bean,
  * so swapping in OpenCV, YOLO or a CAD parser later means adding one class and
  * one branch here — nothing else in the module changes.
+ *
+ * When the vision detector returns very few objects (< 3), the result is likely
+ * a truncated response or the preprocessor stripped too much, so the composite
+ * retries with the original unpreprocessed image before giving up.
  */
 @Configuration
 @EnableConfigurationProperties(DetectionProperties::class)
 class DetectionConfig {
+    private val log = org.slf4j.LoggerFactory.getLogger(javaClass)
+
     @Bean
     fun floorPlanDetector(
         props: DetectionProperties,
@@ -34,9 +40,36 @@ class DetectionConfig {
                     val heuristicResults = heuristic.detect(image)
                     if (heuristicResults.isNotEmpty()) return heuristicResults
                 }
-                return vision?.detect(image) ?: heuristic.detect(image)
+                if (vision == null) return heuristic.detect(image)
+
+                val result = vision.detect(image)
+                if (result.size >= MIN_OBJECTS) return result
+
+                // Too few objects — the preprocessor may have been too aggressive
+                // or the response was truncated. Retry with the original image if
+                // preprocessing was active (the VisionFloorPlanDetector preprocesses
+                // internally, so we force a retry by temporarily disabling it).
+                if (props.preprocess && result.size < MIN_OBJECTS) {
+                    log.info(
+                        "Vision detector returned only {} objects; retrying with preprocessing disabled",
+                        result.size
+                    )
+                    val savedPreprocess = props.preprocess
+                    try {
+                        props.preprocess = false
+                        val retry = vision.detect(image)
+                        if (retry.size > result.size) return retry
+                    } finally {
+                        props.preprocess = savedPreprocess
+                    }
+                }
+                return result
             }
         }
     }
-}
 
+    private companion object {
+        /** Minimum objects expected from a real floor plan scan. */
+        const val MIN_OBJECTS = 3
+    }
+}

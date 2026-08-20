@@ -159,9 +159,13 @@ class FloorPlanDetectionService(
      * Assigns spatial codes: desks are grouped into rows by vertical position
      * and lettered top to bottom, then numbered left to right, so A01 sits
      * beside A02 on the plan rather than wherever the detector happened to
-     * emit it. Rooms keep their label and get no code.
+     * emit it. Rooms receive type-prefixed sequential codes (C1, CR1, MR1…)
+     * so the overlay labels are meaningful before the user names them.
      */
     private fun numbered(candidates: List<DetectionCandidate>): List<Pair<DetectionCandidate, String?>> {
+        val codes = HashMap<DetectionCandidate, String>()
+
+        // ---- Desk row-assignment ----
         val desks = candidates.filter { it.type == DetectedObjectType.DESK }
         val rows = mutableListOf<MutableList<DetectionCandidate>>()
         desks.sortedBy { it.polygon.center.y }.forEach { desk ->
@@ -169,13 +173,38 @@ class FloorPlanDetectionService(
             val sameRow = row != null && kotlin.math.abs(row.first().polygon.center.y - desk.polygon.center.y) <= ROW_TOLERANCE
             if (sameRow) row!!.add(desk) else rows.add(mutableListOf(desk))
         }
-        val codes = HashMap<DetectionCandidate, String>()
         rows.forEachIndexed { index, row ->
             val letter = rowLetter(index)
             row.sortedBy { it.polygon.center.x }.forEachIndexed { seat, desk ->
                 codes[desk] = "%s%02d".format(letter, seat + 1)
             }
         }
+
+        // ---- Room code generation ----
+        // Each room type gets a prefix and a sequential number sorted by
+        // position (left-to-right, top-to-bottom) for consistency.
+        val roomPrefixes = mapOf(
+            DetectedObjectType.CABIN to "C",
+            DetectedObjectType.CONFERENCE_ROOM to "CR",
+            DetectedObjectType.MEETING_ROOM to "MR",
+            DetectedObjectType.RECEPTION to "REC",
+            DetectedObjectType.PANTRY to "PAN",
+            DetectedObjectType.WASHROOM to "WR",
+            DetectedObjectType.SERVER_ROOM to "SR",
+            DetectedObjectType.STORAGE to "ST"
+        )
+        for ((type, prefix) in roomPrefixes) {
+            candidates
+                .filter { it.type == type }
+                .sortedWith(compareBy({ it.polygon.center.y }, { it.polygon.center.x }))
+                .forEachIndexed { index, candidate ->
+                    // Use the candidate's own name if it has one (from OCR).
+                    if (candidate.name == null) {
+                        codes[candidate] = "$prefix${index + 1}"
+                    }
+                }
+        }
+
         return candidates.map { it to codes[it] }
     }
 
@@ -215,8 +244,11 @@ class FloorPlanDetectionService(
     )
 
     private companion object {
-        /** Desk centres within this fraction of the plan height count as one row. */
-        const val ROW_TOLERANCE = 0.02
+        /**
+         * Desk centres within this fraction of the plan height count as one row.
+         * Lowered from 0.02 to prevent merging adjacent rows on dense floors.
+         */
+        const val ROW_TOLERANCE = 0.012
         val MIN_DESK_SIZE: BigDecimal = BigDecimal("0.5")
     }
 }

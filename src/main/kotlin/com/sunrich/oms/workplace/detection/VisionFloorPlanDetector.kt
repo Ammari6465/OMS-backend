@@ -167,7 +167,7 @@ class VisionFloorPlanDetector(
 
     private companion object {
         const val ANTHROPIC_VERSION = "2023-06-01"
-        const val MAX_TOKENS = 16000
+        const val MAX_TOKENS = 32000
         val SUPPORTED_IMAGE_TYPES = setOf("image/png", "image/jpeg")
 
         val PROMPT = """
@@ -189,21 +189,52 @@ class VisionFloorPlanDetector(
             Rules:
             - Coordinates are fractions of the image: x from 0 (left) to 1 (right),
               y from 0 (top) to 1 (bottom). Never use pixels.
-            - Emit one DESK per individual seat, including each seat of back-to-back
-              rows, bench runs and cubicle clusters. Do not merge a row into one desk.
-            - Use the printed label to choose the type when there is one. Otherwise
-              infer it from the furniture:
-                * large table ringed by chairs -> CONFERENCE_ROOM (smaller, 4-6
-                  chairs, still enclosed -> MEETING_ROOM)
-                * enclosed room with one executive desk and one or two visitor
-                  chairs -> CABIN
-                * dense grid of workstations -> ZONE, plus one DESK per seat
-                * large curved desk with nearby waiting seating -> RECEPTION
-                * toilet and basin fixtures -> WASHROOM, one per enclosed cubicle
-                  space rather than one for the whole block
-                * counters and utility fittings -> PANTRY
-            - Mark circulation space and corridors as WALKWAY, following the
-              corridor exactly as drawn. Marked egress points are EXIT.
+
+            DESK SPLITTING (critical):
+            - Emit one DESK per individual seat. Never merge a row into one desk.
+            - For dense open-office workstation blocks, count seats by the repeating
+              desk-and-chair unit visible in the layout pattern. Each repeating unit
+              is one DESK. If you see a block of 8 paired workstations, that is 16
+              individual desks (8 on each side).
+            - For back-to-back rows and bench runs, each chair position is a desk.
+            - For cubicle clusters, each partitioned workspace is one DESK.
+            - Also emit one ZONE polygon that encloses the entire workstation block.
+
+            CABIN DETECTION:
+            - Enclosed offices along the building perimeter — typically containing
+              one large executive desk and 1-2 visitor chairs — are CABIN type.
+            - Look for rows of identically sized enclosed rooms along an exterior
+              wall. 4-6 such rooms in a row is a common pattern.
+            - Each cabin gets its own polygon following its walls.
+
+            CONFERENCE AND MEETING ROOMS:
+            - A large table ringed by many chairs (8+) in an enclosed room is a
+              CONFERENCE_ROOM.
+            - A smaller enclosed room with a table and 4-6 chairs is a MEETING_ROOM.
+            - Use the printed label if available. Otherwise infer from furniture.
+
+            RECEPTION:
+            - A large curved or L-shaped desk near the entrance, with waiting
+              chairs or sofas nearby, is RECEPTION.
+
+            WASHROOM SPLITTING:
+            - For washroom blocks, emit one WASHROOM polygon per identifiable
+              enclosed stall or partition, not one for the whole block.
+            - If individual stalls cannot be distinguished, emit one WASHROOM per
+              visible toilet fixture.
+            - Basin/sink areas without stalls can be part of the nearest stall.
+
+            PANTRY:
+            - Counters, sinks, and utility fittings in a service area are PANTRY.
+
+            CORRIDORS AND WALKWAYS:
+            - Trace WALKWAY polygons along the main circulation spine and any
+              branch corridors. Follow the actual drawn corridor boundaries.
+            - Include the central spine corridor that connects the main areas.
+            - Each distinct corridor segment should be a separate WALKWAY.
+
+            GENERAL:
+            - Use the printed label to choose the type when there is one.
             - Trace the walls for enclosed rooms so the polygon follows the real
               boundary. A simple rectangle is fine for a desk.
             - Ignore anything that is not building fabric: title text, logos,
