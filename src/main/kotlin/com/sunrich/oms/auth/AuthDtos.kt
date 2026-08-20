@@ -27,6 +27,7 @@ data class CurrentUserResponse(
     val fullName: String?,
     val role: Role,
     val companyId: Long?,
+    val companyIds: Set<Long>,
     val staffId: Long?
 )
 

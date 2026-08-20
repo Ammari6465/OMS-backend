@@ -116,7 +116,8 @@ data class StaffRequest(
     val dateLeft: LocalDate? = null,
     val status: EntityStatus? = null,
     val photoUrl: String? = null,
-    val version: Long? = null
+    val version: Long? = null,
+    val additionalCompanyIds: Set<Long>? = null
 )
 
 data class StaffCreateRequest(
@@ -162,7 +163,10 @@ data class StaffCreateRequest(
     val status: EntityStatus? = null,
 
     @field:Size(max = 500, message = "Photo URL must not exceed 500 characters")
-    val photoUrl: String? = null
+    val photoUrl: String? = null,
+
+    /** Sister concerns where this same employee also works. */
+    val additionalCompanyIds: Set<@Positive(message = "Additional companies must be valid") Long> = emptySet()
 )
 
 data class StaffUpdateRequest(
@@ -211,13 +215,19 @@ data class StaffUpdateRequest(
     val photoUrl: String? = null,
 
     @field:NotNull(message = "Version is required")
-    val version: Long?
+    val version: Long?,
+
+    /** Complete set of secondary sister-concern assignments. */
+    val additionalCompanyIds: Set<@Positive(message = "Additional companies must be valid") Long> = emptySet()
 )
 
 data class StaffResponse(
     val id: Long,
     val companyId: Long,
     val companyName: String,
+    val companyIds: List<Long>,
+    val companyNames: List<String>,
+    val assignments: List<StaffCompanyAssignmentResponse>,
     val deptId: Long?,
     val departmentName: String?,
     val managerId: Long?,
@@ -239,6 +249,21 @@ data class StaffResponse(
     val version: Long,
     val createdAt: LocalDateTime?,
     val updatedAt: LocalDateTime?
+)
+
+data class StaffCompanyAssignmentResponse(
+    val id: Long,
+    val companyId: Long,
+    val companyName: String,
+    val deptId: Long?,
+    val departmentName: String?,
+    val managerId: Long?,
+    val managerName: String?,
+    val title: String?,
+    val isPrimary: Boolean,
+    val effectiveFrom: LocalDate?,
+    val effectiveTo: LocalDate?,
+    val status: EntityStatus
 )
 
 data class PositionRequest(

@@ -10,8 +10,11 @@ data class UserPrincipal(
     val userId: Long,
     val username: String,
     val role: Role,
-    val companyId: Long?
+    val companyId: Long?,
+    val companyIds: Set<Long> = setOfNotNull(companyId)
 ) {
     val isSuperAdmin: Boolean get() = role == Role.SUPER_ADMIN
     val authority: String get() = "ROLE_${role.name}"
+    fun canAccessCompany(requestedCompanyId: Long): Boolean =
+        isSuperAdmin || requestedCompanyId in companyIds
 }

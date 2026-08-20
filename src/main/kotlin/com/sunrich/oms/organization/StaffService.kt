@@ -25,6 +25,7 @@ import java.time.LocalDate
 @Service
 class StaffService(
     private val staff: StaffRepository,
+    private val assignments: StaffCompanyAssignmentRepository,
     private val companies: CompanyRepository,
     private val departments: DepartmentRepository,
     private val positions: PositionRepository,
@@ -69,7 +70,19 @@ class StaffService(
         val specification = Specification<Staff> { root, query, cb ->
             val predicates = mutableListOf<jakarta.persistence.criteria.Predicate>()
             if (!includeDeleted) predicates += cb.isFalse(root.get("isDeleted"))
-            effectiveCompanyId?.let { predicates += cb.equal(root.get<Company>("company").get<Long>("id"), it) }
+            effectiveCompanyId?.let { companyId ->
+                val membership = query.subquery(Long::class.java)
+                val assignment = membership.from(StaffCompanyAssignment::class.java)
+                membership.select(assignment.get<Staff>("staff").get("id")).where(
+                    cb.equal(assignment.get<Company>("company").get<Long>("id"), companyId),
+                    cb.equal(assignment.get<EntityStatus>("status"), EntityStatus.ACTIVE),
+                    cb.isFalse(assignment.get("isDeleted"))
+                )
+                predicates += cb.or(
+                    root.get<Long>("id").`in`(membership),
+                    cb.equal(root.get<Company>("company").get<Long>("id"), companyId)
+                )
+            }
             departmentId?.let { predicates += cb.equal(root.get<Department>("department").get<Long>("id"), it) }
             managerId?.let { predicates += cb.equal(root.get<Staff>("manager").get<Long>("id"), it) }
             positionedStaffId?.let { predicates += cb.equal(root.get<Long>("id"), it) }
@@ -104,7 +117,10 @@ class StaffService(
 
         val result = staff.findAll(specification, pageable)
         val positionByStaff = positionsFor(result.content)
-        return PageResponse.from(result) { entity -> toResponse(entity, positionByStaff[entity.id]) }
+        val assignmentByStaff = assignmentsFor(result.content)
+        return PageResponse.from(result) { entity ->
+            toResponse(entity, positionByStaff[entity.id], assignmentByStaff[entity.id].orEmpty())
+        }
     }
 
     /** Compatibility list for dashboard, profile, organogram, and other existing modules. */
@@ -113,16 +129,17 @@ class StaffService(
         val companyId = scopedCompanyId(null)
         val entities = staff.findAll(Sort.by("name")).asSequence()
             .filter { includeDeleted || !it.isDeleted }
-            .filter { companyId == null || it.company.id == companyId }
+            .filter { companyId == null || it.company.id == companyId || assignments.existsByStaff_IdAndCompany_IdAndIsDeletedFalse(it.id!!, companyId) }
             .toList()
         val positionByStaff = positionsFor(entities)
-        return entities.map { toResponse(it, positionByStaff[it.id]) }
+        val assignmentByStaff = assignmentsFor(entities)
+        return entities.map { toResponse(it, positionByStaff[it.id], assignmentByStaff[it.id].orEmpty()) }
     }
 
     @Transactional(readOnly = true)
     fun get(id: Long): StaffResponse {
         val entity = accessibleStaff(id, includeDeleted = false)
-        return toResponse(entity, positions.findFirstByStaff_IdAndIsDeletedFalse(id))
+        return toResponse(entity, positions.findFirstByStaff_IdAndIsDeletedFalse(id), assignmentsFor(entity))
     }
 
     @Transactional
@@ -150,8 +167,9 @@ class StaffService(
         ensureUniqueEmployeeCode(companyId, entity.employeeCode, null)
         val targetPosition = if (canOccupyPosition(entity)) request.positionId?.let { validPosition(it, entity, null) } else null
         val saved = staff.saveAndFlush(entity)
+        synchronizeCompanyAssignments(saved, request.additionalCompanyIds)
         synchronizePosition(saved, targetPosition)
-        return toResponse(saved, targetPosition).also {
+        return toResponse(saved, targetPosition, assignmentsFor(saved)).also {
             recordAudit(AuditAction.CREATE, saved, null)
             updates.publish(it.companyId, "STAFF", "CREATE", it.id, it.version)
         }
@@ -188,13 +206,14 @@ class StaffService(
         ensureUniqueEmployeeCode(companyId, entity.employeeCode, id)
         val targetPosition = if (canOccupyPosition(entity)) request.positionId?.let { validPosition(it, entity, id) } else null
         val saved = staff.saveAndFlush(entity)
+        synchronizeCompanyAssignments(saved, request.additionalCompanyIds)
         synchronizePosition(saved, targetPosition)
         val action = when {
             oldCompanyId != companyId -> AuditAction.TRANSFER
             oldManagerId != saved.manager?.id -> AuditAction.REPARENT
             else -> AuditAction.UPDATE
         }
-        return toResponse(saved, targetPosition).also {
+        return toResponse(saved, targetPosition, assignmentsFor(saved)).also {
             recordAudit(action, saved, oldValue)
             updates.publish(it.companyId, "STAFF", "UPDATE", it.id, it.version)
         }
@@ -214,6 +233,12 @@ class StaffService(
         entity.status = EntityStatus.INACTIVE
         if (entity.dateLeft == null) entity.dateLeft = LocalDate.now()
         staff.save(entity.apply { markDeleted() })
+        val memberships = assignmentsFor(entity)
+        memberships.forEach {
+            it.status = EntityStatus.INACTIVE
+            it.effectiveTo = entity.dateLeft
+        }
+        assignments.saveAll(memberships)
         recordAudit(AuditAction.DELETE, entity, oldValue)
         updates.publish(entity.company.id!!, "STAFF", "DELETE", id, entity.version)
     }
@@ -229,7 +254,8 @@ class StaffService(
         entity.status = EntityStatus.ACTIVE
         entity.dateLeft = null
         val saved = staff.saveAndFlush(entity.apply { restore() })
-        return toResponse(saved, null).also {
+        synchronizeCompanyAssignments(saved, assignmentsFor(saved).filterNot { it.isPrimary }.map { it.company.id!! }.toSet())
+        return toResponse(saved, null, assignmentsFor(saved)).also {
             recordAudit(AuditAction.RESTORE, saved, null)
             updates.publish(it.companyId, "STAFF", "RESTORE", id, it.version)
         }
@@ -238,6 +264,7 @@ class StaffService(
     @Transactional
     fun createLegacy(request: StaffRequest): StaffResponse = create(StaffCreateRequest(
         companyId = request.companyId,
+        additionalCompanyIds = request.additionalCompanyIds.orEmpty(),
         deptId = request.deptId,
         managerId = request.managerId,
         positionId = request.positionId,
@@ -284,6 +311,7 @@ class StaffService(
         ensureUniqueEmployeeCode(entity.company.id!!, entity.employeeCode, id)
         val targetPosition = if (canOccupyPosition(entity)) request.positionId?.let { validPosition(it, entity, id) } else null
         val saved = staff.saveAndFlush(entity)
+        request.additionalCompanyIds?.let { synchronizeCompanyAssignments(saved, it) }
         if (request.positionId != null || !canOccupyPosition(saved)) synchronizePosition(saved, targetPosition)
         val position = if (canOccupyPosition(saved)) targetPosition ?: oldPosition else null
         val action = when {
@@ -291,7 +319,7 @@ class StaffService(
             oldManagerId != saved.manager?.id -> AuditAction.REPARENT
             else -> AuditAction.UPDATE
         }
-        return toResponse(saved, position).also {
+        return toResponse(saved, position, assignmentsFor(saved)).also {
             recordAudit(action, saved, oldValue)
             updates.publish(it.companyId, "STAFF", "UPDATE", it.id, it.version)
         }
@@ -299,7 +327,7 @@ class StaffService(
 
     private fun accessibleStaff(id: Long, includeDeleted: Boolean): Staff {
         val entity = staff.findById(id).orElseThrow { ResourceNotFoundException("Staff", id) }
-        requireCompanyAccess(entity.company.id!!)
+        requireStaffAccess(entity)
         if (!includeDeleted && entity.isDeleted) throw ResourceNotFoundException("Staff", id)
         return entity
     }
@@ -320,7 +348,9 @@ class StaffService(
     private fun activeManager(id: Long, companyId: Long): Staff {
         val entity = staff.findById(id).orElseThrow { ResourceNotFoundException("Manager", id) }
         if (entity.isDeleted || entity.status != EntityStatus.ACTIVE) throw BadRequestException("Manager must be an active staff member")
-        if (entity.company.id != companyId) throw BadRequestException("Manager must belong to the selected company")
+        if (entity.company.id != companyId && !assignments.existsByStaff_IdAndCompany_IdAndIsDeletedFalse(id, companyId)) {
+            throw BadRequestException("Manager must belong to the selected company")
+        }
         return entity
     }
 
@@ -404,14 +434,24 @@ class StaffService(
         val principal = SecurityUtils.currentPrincipal()
         if (principal.isSuperAdmin) return requestedCompanyId
         val ownCompanyId = principal.companyId ?: throw ForbiddenException("Your account is not assigned to a company")
-        if (requestedCompanyId != null && requestedCompanyId != ownCompanyId) {
+        if (requestedCompanyId != null && !principal.canAccessCompany(requestedCompanyId)) {
             throw ForbiddenException("You cannot access staff belonging to another company")
         }
-        return ownCompanyId
+        return requestedCompanyId ?: ownCompanyId
     }
 
     private fun requireCompanyAccess(companyId: Long) {
         scopedCompanyId(companyId)
+    }
+
+    private fun requireStaffAccess(entity: Staff) {
+        val principal = SecurityUtils.currentPrincipal()
+        if (principal.isSuperAdmin) return
+        if (entity.company.id !in principal.companyIds && principal.companyIds.none {
+                assignments.existsByStaff_IdAndCompany_IdAndIsDeletedFalse(entity.id!!, it)
+            }) {
+            throw ForbiddenException("You cannot access staff belonging to another company")
+        }
     }
 
     private fun positionsFor(entities: Collection<Staff>): Map<Long, Position> {
@@ -420,10 +460,87 @@ class StaffService(
         return positions.findAllByStaff_IdInAndIsDeletedFalse(ids).associateBy { it.staff!!.id!! }
     }
 
-    private fun toResponse(entity: Staff, position: Position?) = StaffResponse(
+    private fun assignmentsFor(entities: Collection<Staff>): Map<Long, List<StaffCompanyAssignment>> {
+        val ids = entities.mapNotNull(Staff::id)
+        if (ids.isEmpty()) return emptyMap()
+        return assignments.findAllByStaff_IdInAndIsDeletedFalse(ids).groupBy { it.staff.id!! }
+    }
+
+    private fun assignmentsFor(entity: Staff): List<StaffCompanyAssignment> =
+        assignments.findAllByStaff_IdAndIsDeletedFalseOrderByIsPrimaryDescCompany_NameAsc(entity.id!!)
+
+    /** Reconciles the primary row plus the complete secondary-company set atomically. */
+    private fun synchronizeCompanyAssignments(entity: Staff, requestedSecondaryIds: Set<Long>) {
+        val primaryId = entity.company.id!!
+        val secondaryIds = requestedSecondaryIds - primaryId
+        val targetIds = linkedSetOf(primaryId).apply { addAll(secondaryIds) }
+        val targetCompanies = targetIds.associateWith { id ->
+            requireCompanyAccess(id)
+            activeCompany(id).also { candidate ->
+                if (groupRootId(candidate) != groupRootId(entity.company)) {
+                    throw BadRequestException("All employee assignments must belong to the same company group")
+                }
+            }
+        }
+        val existing = assignments.findAllByStaff_Id(entity.id!!)
+            .associateBy { it.company.id!! }
+        existing.values.filter { it.company.id !in targetIds && !it.isDeleted }.forEach {
+            it.status = EntityStatus.INACTIVE
+            it.effectiveTo = LocalDate.now()
+            it.markDeleted()
+        }
+        val active = targetIds.map { companyId ->
+            val assignment = existing[companyId] ?: StaffCompanyAssignment(
+                staff = entity,
+                company = targetCompanies.getValue(companyId),
+                effectiveFrom = entity.dateJoined ?: LocalDate.now()
+            )
+            assignment.restore()
+            assignment.isPrimary = companyId == primaryId
+            assignment.status = entity.status
+            assignment.effectiveTo = entity.dateLeft
+            if (assignment.isPrimary) {
+                assignment.department = entity.department
+                assignment.manager = entity.manager
+                assignment.title = entity.title
+            } else if (assignment.title == null) {
+                assignment.title = entity.title
+            }
+            assignment
+        }
+        assignments.saveAll(existing.values.filter { it.company.id !in targetIds } + active)
+        assignments.flush()
+    }
+
+    private fun groupRootId(company: Company): Long {
+        var current = company
+        val seen = mutableSetOf<Long>()
+        while (current.parentCompany != null && seen.add(current.id!!)) current = current.parentCompany!!
+        return current.id!!
+    }
+
+    private fun toResponse(entity: Staff, position: Position?, memberships: List<StaffCompanyAssignment>) = StaffResponse(
         id = entity.id!!,
         companyId = entity.company.id!!,
         companyName = entity.company.name,
+        companyIds = memberships.map { it.company.id!! },
+        companyNames = memberships.map { it.company.name },
+        assignments = memberships.map {
+            StaffCompanyAssignmentResponse(
+                id = it.id!!,
+                companyId = it.company.id!!,
+                companyName = it.company.name,
+                deptId = it.department?.id,
+                departmentName = it.department?.name,
+                managerId = it.manager?.id,
+                managerName = it.manager?.name,
+                title = it.title,
+                isPrimary = it.isPrimary,
+                effectiveFrom = it.effectiveFrom,
+                effectiveTo = it.effectiveTo,
+                status = it.status
+            )
+        },
         deptId = entity.department?.id,
         departmentName = entity.department?.name,
         managerId = entity.manager?.id,

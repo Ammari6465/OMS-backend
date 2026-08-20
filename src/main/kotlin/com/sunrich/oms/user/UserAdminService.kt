@@ -389,11 +389,11 @@ class UserAdminService(
         private val SORT_FIELDS = mapOf("fullName" to "fullName", "username" to "username", "email" to "email",
             "role" to "role", "lastLogin" to "lastLogin", "createdAt" to "createdAt", "isActive" to "isActive")
         private val ROLE_DETAILS = linkedMapOf(
-            Role.SUPER_ADMIN to RoleDetail("Full system administrator across all companies.", "System", listOf("Manage all companies", "Manage all users and roles", "Manage settings", "View all audit logs")),
-            Role.COMPANY_ADMIN to RoleDetail("Administrator for an assigned company.", "Company", listOf("Manage company organization", "Manage company users", "View company audit log")),
-            Role.MANAGER to RoleDetail("Management access within the assigned company.", "Company read", listOf("View organogram", "View staff and reporting lines")),
-            Role.STAFF to RoleDetail("Standard employee self-service access.", "Self/company view", listOf("View own profile", "View company organogram")),
-            Role.READ_ONLY to RoleDetail("Read-only organizational access.", "Read only", listOf("View permitted organograms", "No management actions"))
+            Role.SUPER_ADMIN to RoleDetail("Group-level IT or HR head with authority across Sunrich Companies and every sister concern.", "Group", listOf("Full access across all companies", "Manage users and roles", "Configure the system", "View all audit logs")),
+            Role.COMPANY_ADMIN to RoleDetail("HR or administration manager for an assigned company.", "Assigned company", listOf("Create, edit, and deactivate staff", "Manage departments and reporting lines", "Manage company users", "View company audit history")),
+            Role.MANAGER to RoleDetail("Department head, director, or people manager.", "Assigned companies", listOf("View the full company organogram", "View direct reports' profiles", "View reporting lines", "No organization editing")),
+            Role.STAFF to RoleDetail("Employee working in one or more Sunrich group companies.", "Own assignments", listOf("View assigned-company organograms", "View own profile", "View own reporting line", "No management actions")),
+            Role.READ_ONLY to RoleDetail("Board member, auditor, or external stakeholder.", "Specified organograms", listOf("View permitted organograms", "No staff profile management", "No organization editing"))
         )
     }
 }

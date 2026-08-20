@@ -120,6 +120,37 @@ ALTER TABLE departments
         REFERENCES staff (staff_id) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- ---------------------------------------------------------------------
+-- staff_company_assignments : one person may work for multiple companies
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS staff_company_assignments (
+    assignment_id  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    staff_id       BIGINT UNSIGNED NOT NULL,
+    company_id     BIGINT UNSIGNED NOT NULL,
+    dept_id        BIGINT UNSIGNED NULL,
+    manager_id     BIGINT UNSIGNED NULL,
+    title          VARCHAR(200)    NULL,
+    is_primary     TINYINT(1)      NOT NULL DEFAULT 0,
+    effective_from DATE            NULL,
+    effective_to   DATE            NULL,
+    status         VARCHAR(20)     NOT NULL DEFAULT 'ACTIVE',
+    is_deleted     TINYINT(1)      NOT NULL DEFAULT 0,
+    deleted_at     DATETIME        NULL,
+    created_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_by     BIGINT UNSIGNED NULL,
+    updated_by     BIGINT UNSIGNED NULL,
+    version        BIGINT          NOT NULL DEFAULT 0,
+    PRIMARY KEY (assignment_id),
+    UNIQUE KEY uq_staff_company_assignment (staff_id, company_id),
+    KEY idx_staff_assignment_company (company_id, status, is_deleted),
+    KEY idx_staff_assignment_staff (staff_id, is_primary, is_deleted),
+    CONSTRAINT fk_staff_assignment_staff FOREIGN KEY (staff_id) REFERENCES staff(staff_id),
+    CONSTRAINT fk_staff_assignment_company FOREIGN KEY (company_id) REFERENCES companies(company_id),
+    CONSTRAINT fk_staff_assignment_department FOREIGN KEY (dept_id) REFERENCES departments(dept_id) ON DELETE SET NULL,
+    CONSTRAINT fk_staff_assignment_manager FOREIGN KEY (manager_id) REFERENCES staff(staff_id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
 -- positions : filled & vacant positions in the organogram
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS positions (

@@ -30,6 +30,17 @@ interface StaffRepository : JpaRepository<Staff, Long>, JpaSpecificationExecutor
     fun findAllByManager_IdAndIsDeletedFalse(managerId: Long): List<Staff>
     fun countByCompany_IdAndStatusAndIsDeletedFalse(companyId: Long, status: EntityStatus): Long
 }
+interface StaffCompanyAssignmentRepository : JpaRepository<StaffCompanyAssignment, Long> {
+    @EntityGraph(attributePaths = ["staff", "company", "department", "manager"])
+    fun findAllByStaff_IdAndIsDeletedFalseOrderByIsPrimaryDescCompany_NameAsc(staffId: Long): List<StaffCompanyAssignment>
+    @EntityGraph(attributePaths = ["staff", "company", "department", "manager"])
+    fun findAllByStaff_Id(staffId: Long): List<StaffCompanyAssignment>
+    @EntityGraph(attributePaths = ["staff", "company", "department", "manager"])
+    fun findAllByStaff_IdInAndIsDeletedFalse(staffIds: Collection<Long>): List<StaffCompanyAssignment>
+    @EntityGraph(attributePaths = ["staff", "company", "department", "manager"])
+    fun findAllByCompany_IdAndStatusAndIsDeletedFalse(companyId: Long, status: EntityStatus): List<StaffCompanyAssignment>
+    fun existsByStaff_IdAndCompany_IdAndIsDeletedFalse(staffId: Long, companyId: Long): Boolean
+}
 interface PositionRepository : JpaRepository<Position, Long>, JpaSpecificationExecutor<Position> {
     @EntityGraph(attributePaths = ["company", "department", "reportsToPosition", "staff"])
     fun findAllByCompany_IdAndIsDeletedFalse(companyId: Long): List<Position>

@@ -22,6 +22,7 @@ class OrganogramService(
     private val companies: CompanyRepository,
     private val departments: DepartmentRepository,
     private val staff: StaffRepository,
+    private val assignments: StaffCompanyAssignmentRepository,
     private val positions: PositionRepository,
     private val users: UserRepository,
     private val audit: AuditTrailService,
@@ -33,12 +34,24 @@ class OrganogramService(
         val company = companies.findById(companyId).orElseThrow { ResourceNotFoundException("Company", companyId) }
         if (company.isDeleted || company.status != EntityStatus.ACTIVE) throw ResourceNotFoundException("Active company", companyId)
         val depts = departments.findAllByCompany_IdAndIsDeletedFalse(companyId).filter { it.status == EntityStatus.ACTIVE }
-        val people = staff.findAllByCompany_IdAndIsDeletedFalse(companyId).filter { it.status == EntityStatus.ACTIVE }
+        val assignedPeople = assignments.findAllByCompany_IdAndStatusAndIsDeletedFalse(companyId, EntityStatus.ACTIVE)
+            .filter { !it.staff.isDeleted && it.staff.status == EntityStatus.ACTIVE }
+        val assignedIds = assignedPeople.mapTo(hashSetOf()) { it.staff.id }
+        val legacyPrimaryPeople = staff.findAllByCompany_IdAndIsDeletedFalse(companyId)
+            .filter { it.status == EntityStatus.ACTIVE && it.id !in assignedIds }
+            .map { person -> StaffCompanyAssignment(
+                staff = person, company = company, department = person.department, manager = person.manager,
+                title = person.title, isPrimary = true, effectiveFrom = person.dateJoined, effectiveTo = person.dateLeft,
+                status = person.status
+            ) }
+        val people = assignedPeople + legacyPrimaryPeople
         val roles = positions.findAllByCompany_IdAndIsDeletedFalse(companyId).filter { it.status != PositionStatus.CLOSED }
 
-        val nodes = if (view == OrganogramView.EMPLOYEE) people.map { person ->
-            OrganogramNode(person.id!!, person.manager?.id, companyId, person.department?.id, person.employeeCode,
-                person.name, person.title, person.photoUrl, person.status, person.version, staffId = person.id)
+        val nodes = if (view == OrganogramView.EMPLOYEE) people.map { assignment ->
+            val person = assignment.staff
+            OrganogramNode(person.id!!, assignment.manager?.id, companyId, assignment.department?.id, person.employeeCode,
+                person.name, assignment.title ?: person.title, person.photoUrl, person.status,
+                maxOf(person.version, assignment.version), staffId = person.id)
         } else roles.filter { includeVacancies || !it.isVacant }.map { role ->
             OrganogramNode(role.id!!, role.reportsToPosition?.id, companyId, role.department?.id,
                 role.staff?.employeeCode, role.staff?.name ?: role.title, role.title, role.staff?.photoUrl,
@@ -64,7 +77,7 @@ class OrganogramService(
     @Transactional(readOnly = true)
     fun staffDetails(staffId: Long): OrganogramStaffDetails {
         val person = staff.findById(staffId).orElseThrow { ResourceNotFoundException("Staff", staffId) }
-        scope(person.company.id!!)
+        scopeStaff(person)
         if (person.isDeleted) throw ResourceNotFoundException("Staff", staffId)
         val canContact = SecurityUtils.currentPrincipal().role in setOf(Role.SUPER_ADMIN, Role.COMPANY_ADMIN, Role.MANAGER)
         return OrganogramStaffDetails(person.id!!, person.name, person.employeeCode, person.title, person.department?.id,
@@ -141,8 +154,18 @@ class OrganogramService(
 
     private fun scope(companyId: Long) {
         val principal = SecurityUtils.currentPrincipal()
-        if (principal.role != Role.SUPER_ADMIN && principal.companyId != companyId) {
+        if (!principal.canAccessCompany(companyId)) {
             throw ForbiddenException("You cannot access another company's organogram")
+        }
+    }
+
+    private fun scopeStaff(person: Staff) {
+        val principal = SecurityUtils.currentPrincipal()
+        if (principal.role == Role.SUPER_ADMIN) return
+        if (person.company.id !in principal.companyIds && principal.companyIds.none {
+                assignments.existsByStaff_IdAndCompany_IdAndIsDeletedFalse(person.id!!, it)
+            }) {
+            throw ForbiddenException("You cannot access another company's staff profile")
         }
     }
 }

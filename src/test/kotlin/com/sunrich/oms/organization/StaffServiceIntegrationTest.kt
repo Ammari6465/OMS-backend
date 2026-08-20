@@ -66,6 +66,27 @@ class StaffServiceIntegrationTest {
     }
 
     @Test
+    fun `one employee can be assigned to multiple sister concerns without duplicate staff records`() {
+        val employee = service.create(createRequest(companyA.id, departmentA.id, "GROUP01", "Group Employee").copy(
+            additionalCompanyIds = setOf(companyB.id)
+        ))
+
+        assertThat(employee.companyId).isEqualTo(companyA.id)
+        assertThat(employee.companyIds).containsExactlyInAnyOrder(companyA.id, companyB.id)
+        assertThat(employee.assignments.count { it.isPrimary }).isEqualTo(1)
+
+        val fromSecondaryCompany = service.list(
+            page = 0, size = 20, sort = "name", direction = "asc", search = "Group Employee",
+            companyId = companyB.id, departmentId = null, positionId = null,
+            managerId = null, status = EntityStatus.ACTIVE, includeDeleted = false
+        )
+        assertThat(fromSecondaryCompany.content.map { it.id }).containsExactly(employee.id)
+
+        authenticate(Role.COMPANY_ADMIN, companyB.id)
+        assertThat(service.get(employee.id).companyIds).contains(companyB.id)
+    }
+
+    @Test
     fun `list searches organizational and contact fields and filters joining dates and employment type`() {
         val manager = service.create(createRequest(companyA.id, departmentA.id, "MGR70", "Nadia Supervisor"))
         val position = organizations.createPosition(PositionRequest(

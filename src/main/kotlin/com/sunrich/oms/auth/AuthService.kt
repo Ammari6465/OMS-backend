@@ -9,6 +9,7 @@ import com.sunrich.oms.security.JwtService
 import com.sunrich.oms.security.SecurityUtils
 import com.sunrich.oms.user.User
 import com.sunrich.oms.user.UserRepository
+import com.sunrich.oms.organization.StaffCompanyAssignmentRepository
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.security.crypto.password.PasswordEncoder
@@ -22,6 +23,7 @@ import com.sunrich.oms.systemdata.AuditTrailService
 @Service
 class AuthService(
     private val userRepository: UserRepository,
+    private val assignments: StaffCompanyAssignmentRepository,
     private val passwordEncoder: PasswordEncoder,
     private val jwtService: JwtService,
     private val loginAttemptService: LoginAttemptService,
@@ -62,11 +64,12 @@ class AuthService(
         auditTrail.record(user, AuditAction.LOGIN, "Authentication", user.id, user.companyId, "Login",
             after = "username=${user.username},result=SUCCESS")
 
-        val token = jwtService.generateToken(user.id!!, user.username, user.role, user.companyId)
+        val companyIds = user.accessibleCompanyIds()
+        val token = jwtService.generateToken(user.id!!, user.username, user.role, user.companyId, companyIds)
         return LoginResponse(
             token = token,
             expiresInMs = jwtExpirationMs,
-            user = user.toCurrentUserResponse()
+            user = user.toCurrentUserResponse(companyIds)
         )
     }
 
@@ -156,13 +159,25 @@ class AuthService(
             after = "username=${user.username},result=SUCCESS")
     }
 
-    private fun User.toCurrentUserResponse() = CurrentUserResponse(
+    private fun User.accessibleCompanyIds(): Set<Long> {
+        val primary = setOfNotNull(companyId)
+        if (role !in setOf(com.sunrich.oms.common.enums.Role.MANAGER, com.sunrich.oms.common.enums.Role.STAFF) || staffId == null) {
+            return primary
+        }
+        return assignments.findAllByStaff_IdAndIsDeletedFalseOrderByIsPrimaryDescCompany_NameAsc(staffId!!)
+            .filter { it.status == EntityStatus.ACTIVE }
+            .mapTo(linkedSetOf()) { it.company.id!! }
+            .ifEmpty { primary }
+    }
+
+    private fun User.toCurrentUserResponse(companyIds: Set<Long> = accessibleCompanyIds()) = CurrentUserResponse(
         userId = id!!,
         username = username,
         email = email,
         fullName = fullName,
         role = role,
         companyId = companyId,
+        companyIds = companyIds,
         staffId = staffId
     )
 }

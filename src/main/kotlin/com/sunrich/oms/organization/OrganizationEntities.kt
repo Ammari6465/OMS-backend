@@ -181,6 +181,62 @@ class Staff(
     var id: Long? = null
 }
 
+/**
+ * One employment context for a person inside the Sunrich group. The legacy
+ * columns on [Staff] remain the canonical/primary assignment so existing
+ * integrations keep working; additional rows make the same person available
+ * in any number of sister concerns without duplicating their identity.
+ */
+@Entity
+@Table(
+    name = "staff_company_assignments",
+    uniqueConstraints = [
+        UniqueConstraint(name = "uq_staff_company_assignment", columnNames = ["staff_id", "company_id"])
+    ],
+    indexes = [
+        Index(name = "idx_staff_assignment_company", columnList = "company_id,status,is_deleted"),
+        Index(name = "idx_staff_assignment_staff", columnList = "staff_id,is_primary,is_deleted")
+    ]
+)
+class StaffCompanyAssignment(
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "staff_id", nullable = false, foreignKey = ForeignKey(name = "fk_staff_assignment_staff"))
+    var staff: Staff,
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "company_id", nullable = false, foreignKey = ForeignKey(name = "fk_staff_assignment_company"))
+    var company: Company,
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "dept_id", foreignKey = ForeignKey(name = "fk_staff_assignment_department"))
+    var department: Department? = null,
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "manager_id", foreignKey = ForeignKey(name = "fk_staff_assignment_manager"))
+    var manager: Staff? = null,
+
+    @Column(length = 200)
+    var title: String? = null,
+
+    @Column(name = "is_primary", nullable = false)
+    var isPrimary: Boolean = false,
+
+    @Column(name = "effective_from")
+    var effectiveFrom: LocalDate? = null,
+
+    @Column(name = "effective_to")
+    var effectiveTo: LocalDate? = null,
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    var status: EntityStatus = EntityStatus.ACTIVE
+) : BaseEntity() {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "assignment_id")
+    var id: Long? = null
+}
+
 @Entity
 @Table(
     name = "positions",

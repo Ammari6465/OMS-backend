@@ -22,12 +22,19 @@ class JwtService(
 ) {
     private val key: Key = Keys.hmacShaKeyFor(secret.toByteArray())
 
-    fun generateToken(userId: Long, username: String, role: Role, companyId: Long?): String =
+    fun generateToken(
+        userId: Long,
+        username: String,
+        role: Role,
+        companyId: Long?,
+        companyIds: Set<Long> = setOfNotNull(companyId)
+    ): String =
         Jwts.builder()
             .setSubject(username)
             .claim("userId", userId)
             .claim("role", role.name)
             .apply { companyId?.let { claim("companyId", it) } }
+            .claim("companyIds", companyIds.sorted())
             .setIssuedAt(Date())
             .setExpiration(Date(System.currentTimeMillis() + expirationMs))
             .signWith(key, SignatureAlgorithm.HS256)
@@ -42,7 +49,11 @@ class JwtService(
                 userId = (claims["userId"] as Number).toLong(),
                 username = claims.subject,
                 role = Role.fromString(claims["role"] as? String),
-                companyId = (claims["companyId"] as? Number)?.toLong()
+                companyId = (claims["companyId"] as? Number)?.toLong(),
+                companyIds = (claims["companyIds"] as? Collection<*>)
+                    ?.mapNotNull { (it as? Number)?.toLong() }
+                    ?.toSet()
+                    ?: setOfNotNull((claims["companyId"] as? Number)?.toLong())
             )
         }
     } catch (ex: Exception) {
