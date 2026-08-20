@@ -24,11 +24,14 @@ class WorkplaceService(
  @Value("\${oms.workplace.hide-staff-names:false}")private val hideNames:Boolean
 ){
  private val log=org.slf4j.LoggerFactory.getLogger(javaClass)
- fun listOffices(companyId:Long?,includeDeleted:Boolean=false):List<OfficeResponse>{val f=flags(includeDeleted);val cid=principalCompany()?:companyId;val list=if(cid==null)offices.findAllScoped(f) else offices.findCompanyScoped(cid,f);return list.filter{companyId==null||it.company.id==companyId}.map(::office)}
+ fun listOffices(companyId:Long?,includeDeleted:Boolean=false):List<OfficeResponse>{val f=flags(includeDeleted);val ids=principalCompanies()?:companyId?.let(::sharedWith);val list=if(ids==null)offices.findAllScoped(f) else offices.findCompanyScoped(ids,f)
+  // Viewing "as" a company shows its own offices plus the shared premises it
+  // inherits from the holding company above it.
+  val requested=companyId?.let(::sharedWith);return list.filter{requested==null||it.company.id in requested}.map(::office)}
  fun listBuildings(officeId:Long?,includeDeleted:Boolean=false)=scopedList(includeDeleted,buildings::findAllScoped,buildings::findCompanyScoped).filter{officeId==null||it.office.id==officeId}.map(::building)
  fun listFloors(buildingId:Long?,includeDeleted:Boolean=false)=scopedList(includeDeleted,floors::findAllScoped,floors::findCompanyScoped).filter{buildingId==null||it.building.id==buildingId}.map(::floor)
- fun listZones(floorId:Long?,includeDeleted:Boolean=false)=(if(floorId!=null){ownedFloor(floorId);zones.findByFloor(floorId,flags(includeDeleted))}else scopedList(includeDeleted,zones::findAllScoped,zones::findCompanyScoped)).map(::zone)
- fun listDesks(floorId:Long?,includeDeleted:Boolean=false):List<DeskResponse>{val list=if(floorId!=null){ownedFloor(floorId);desks.findByFloor(floorId,flags(includeDeleted))}else scopedList(includeDeleted,desks::findAllScoped,desks::findCompanyScoped);val ctx=assignmentContext(list);return list.map{desk(it,ctx)}}
+ fun listZones(floorId:Long?,includeDeleted:Boolean=false)=(if(floorId!=null){readableFloor(floorId);zones.findByFloor(floorId,flags(includeDeleted))}else scopedList(includeDeleted,zones::findAllScoped,zones::findCompanyScoped)).map(::zone)
+ fun listDesks(floorId:Long?,includeDeleted:Boolean=false):List<DeskResponse>{val list=if(floorId!=null){readableFloor(floorId);desks.findByFloor(floorId,flags(includeDeleted))}else scopedList(includeDeleted,desks::findAllScoped,desks::findCompanyScoped);val ctx=assignmentContext(list);return list.map{desk(it,ctx)}}
 
  @Transactional fun createOffice(r:OfficeRequest):OfficeResponse{scope(r.companyId);val c=companies.findById(r.companyId).orElseThrow{ResourceNotFoundException("Company",r.companyId)};val code=code(r.code);if(offices.existsByCompany_IdAndCodeIgnoreCaseAndIsDeletedFalse(c.id!!,code))duplicate("Office code");val e=offices.save(Office(c,text(r.name,"Office name"),code,r.address?.trim(),r.city?.trim(),r.country?.trim(),validZone(r.timeZone),r.status));record(e.company.id!!,"Office",e.id,AuditAction.CREATE,null,"code=$code,name=${e.name}");return office(e)}
  @Transactional fun updateOffice(id:Long,r:OfficeRequest):OfficeResponse{val e=ownedOffice(id);version(e.version,r.version);scope(r.companyId);if(e.company.id!=r.companyId)throw BadRequestException("Office company cannot be changed");val before="code=${e.code},name=${e.name}";val code=code(r.code);if(offices.existsByCompany_IdAndCodeIgnoreCaseAndIdNotAndIsDeletedFalse(r.companyId,code,id))duplicate("Office code");e.name=text(r.name,"Office name");e.code=code;e.address=r.address?.trim();e.city=r.city?.trim();e.country=r.country?.trim();e.timeZone=validZone(r.timeZone);e.status=r.status;val s=offices.saveAndFlush(e);record(r.companyId,"Office",id,AuditAction.UPDATE,before,"code=${s.code},name=${s.name}");return office(s)}
@@ -42,9 +45,9 @@ class WorkplaceService(
  @Transactional fun updateDesk(id:Long,r:DeskRequest):DeskResponse{val e=ownedDesk(id);version(e.version,r.version);val f=ownedFloor(r.floorId);if(company(f)!=company(e))cross();validateCoordinates(r);val z=r.zoneId?.let{ownedZone(it).also{x->if(x.floor.id!=f.id)cross()}};val c=code(r.code);if(desks.existsByFloor_IdAndCodeIgnoreCaseAndIdNotAndIsDeletedFalse(f.id!!,c,id))duplicate("Desk code");apply(e,f,z,c,r);val s=desks.saveAndFlush(e);record(company(e),"Desk",id,AuditAction.UPDATE,null,"desk=$c,x=${s.x},y=${s.y}");return desk(s,current(s))}
  @Transactional fun batch(floorId:Long,r:DeskBatchRequest):List<DeskResponse>{ownedFloor(floorId);val existing=desks.findAllByFloor_IdAndIsDeletedFalseOrderByCode(floorId).associateBy{it.code.uppercase()};r.removedDeskIds.distinct().forEach{archiveDesk(ownedDesk(it).also{d->if(d.floor.id!=floorId)cross()})};r.desks.forEach{if(it.floorId!=floorId)throw BadRequestException("All desks must belong to the selected floor")};r.desks.forEach{req->val match=existing[req.code.trim().uppercase()];if(match==null)createDesk(req) else updateDesk(match.id!!,req.copy(version=match.version))};val saved=desks.findByFloor(floorId,flags(false));val ctx=assignmentContext(saved);return saved.map{desk(it,ctx)}}
 
- fun map(floorId:Long):FloorMapResponse{val f=ownedFloor(floorId);val list=desks.findByFloor(floorId,flags(false));val ctx=assignmentContext(list);return FloorMapResponse(floor(f),f.planStorageRef?.let{"/workplaces/floors/$floorId/plan"},zones.findAllByFloor_IdAndIsDeletedFalseOrderByName(floorId).map(::zone),list.map{desk(it,ctx)})}
+ fun map(floorId:Long):FloorMapResponse{val f=readableFloor(floorId);val list=desks.findByFloor(floorId,flags(false));val ctx=assignmentContext(list);return FloorMapResponse(floor(f),f.planStorageRef?.let{"/workplaces/floors/$floorId/plan"},zones.findAllByFloor_IdAndIsDeletedFalseOrderByName(floorId).map(::zone),list.map{desk(it,ctx)})}
  @Transactional fun uploadPlan(floorId:Long,file:MultipartFile):FloorResponse{val f=ownedFloor(floorId);val old=f.planStorageRef;val saved=storage.store(file);managePlanFiles(saved.reference,old);f.planStorageRef=saved.reference;f.planOriginalName=saved.originalName;f.planMediaType=saved.mediaType;f.planWidth=saved.width;f.planHeight=saved.height;val out=floors.saveAndFlush(f);record(company(f),"Floor",floorId,AuditAction.UPDATE,old?.let{"plan=present"},"plan=${saved.mediaType},name=${saved.originalName}");notifyActor(NotificationType.FLOOR_PLAN_REPLACED,"Floor plan updated for ${f.name}","/workplaces/floors/$floorId/map",floorId);return floor(out)}
- fun plan(floorId:Long):Triple<ByteArray,String,String>{val f=ownedFloor(floorId);val ref=f.planStorageRef?:throw ResourceNotFoundException("Floor plan");return Triple(storage.read(ref),f.planMediaType?:"application/octet-stream",f.planOriginalName?:"floor-plan")}
+ fun plan(floorId:Long):Triple<ByteArray,String,String>{val f=readableFloor(floorId);val ref=f.planStorageRef?:throw ResourceNotFoundException("Floor plan");return Triple(storage.read(ref),f.planMediaType?:"application/octet-stream",f.planOriginalName?:"floor-plan")}
  @Transactional fun removePlan(floorId:Long){val f=ownedFloor(floorId);val old=f.planStorageRef?:return;f.planStorageRef=null;f.planOriginalName=null;f.planMediaType=null;f.planWidth=null;f.planHeight=null;floors.save(f);storage.delete(old);record(company(f),"Floor",floorId,AuditAction.UPDATE,"plan=present","plan=removed")}
 
  @Transactional fun assign(r:AssignmentRequest):AssignmentResponse{val d=ownedDesk(r.deskId);val s=staff.findById(r.staffId).orElseThrow{ResourceNotFoundException("Staff",r.staffId)};if(s.isDeleted||s.status!=EntityStatus.ACTIVE)throw BadRequestException("Only active staff can receive a desk assignment");if(s.company.id!=company(d))cross();if(d.isDeleted||d.status!=EntityStatus.ACTIVE||d.mode==DeskMode.UNAVAILABLE||d.availability==DeskAvailability.UNAVAILABLE)throw ConflictException("Desk is unavailable");if(r.effectiveTo!=null&&r.effectiveTo<r.effectiveFrom)throw BadRequestException("Assignment end date cannot precede its start date");val far=r.effectiveTo?:LocalDate.of(9999,12,31);if(r.primaryAssignment&&assignments.overlappingStaff(s.id!!,r.effectiveFrom,far).any{it.primaryAssignment})throw ConflictException("Staff already has an overlapping primary desk assignment");if(d.mode==DeskMode.ASSIGNED&&assignments.overlappingDesk(d.id!!,r.effectiveFrom,far).isNotEmpty())throw ConflictException("Desk already has an overlapping permanent assignment");val a=assignments.save(DeskAssignment(d,s,r.effectiveFrom,r.effectiveTo,r.primaryAssignment,r.reason?.trim(),actor()));syncAvailability(d);record(company(d),"DeskAssignment",a.id,AuditAction.CREATE,null,assignmentAudit(a));notifyActor(NotificationType.DESK_ASSIGNED,"${s.name} assigned to desk ${d.code}","/workplaces/floors/${d.floor.id}/map?deskId=${d.id}",a.id);return assignment(a)}
@@ -53,7 +56,11 @@ class WorkplaceService(
  @Transactional fun releaseForStaff(staffId:Long,date:LocalDate,reason:String){assignments.activeForStaff(staffId,date).forEach{a->releaseInternal(a,date,reason);notify(a.assignedBy,NotificationType.DESK_RELEASED,"${a.staff.name} released from desk ${a.desk.code}: $reason",deskLink(a.desk),a.id)}}
  fun currentForStaff(staffId:Long):AssignmentResponse?=assignments.activeForStaff(staffId,LocalDate.now(clock)).firstOrNull()?.also{scope(company(it.desk))}?.let{assignment(it)}
  fun history(staffId:Long)=assignments.findAllByStaff_IdAndIsDeletedFalseOrderByEffectiveFromDesc(staffId).filter{companyAllowed(company(it.desk))}.map{assignment(it)}
- @Transactional(readOnly=true) fun summary(companyId:Long?):WorkplaceSummary{val cid=scopedCompany(companyId);val date=LocalDate.now(clock);val total=desks.countByFloor_Building_Office_Company_IdAndIsDeletedFalse(cid);val unavailable=desks.countUnavailable(cid,DeskMode.UNAVAILABLE,DeskAvailability.UNAVAILABLE);val assigned=assignments.countActive(cid,date);val assignable=(total-unavailable).coerceAtLeast(0);val activeStaff=staff.countByCompany_IdAndStatusAndIsDeletedFalse(cid,EntityStatus.ACTIVE);val staffWithDesk=assignments.countAssignedStaff(cid,date);return WorkplaceSummary(total,assigned,(assignable-assigned).coerceAtLeast(0),unavailable,(activeStaff-staffWithDesk).coerceAtLeast(0),if(assignable==0L)0.0 else assigned*100.0/assignable)}
+ @Transactional(readOnly=true) fun summary(companyId:Long?):WorkplaceSummary{// Counted over the same companies the map shows, so the tiles cannot report
+  // zero desks while shared premises are on screen. Staff, though, are counted
+  // for the selected company alone: people belong to one company even when the
+  // building they sit in is shared.
+  val cid=scopedCompany(companyId);val ids=sharedWith(cid);val date=LocalDate.now(clock);val total=desks.countByFloor_Building_Office_Company_IdInAndIsDeletedFalse(ids);val unavailable=desks.countUnavailable(ids,DeskMode.UNAVAILABLE,DeskAvailability.UNAVAILABLE);val assigned=assignments.countActive(ids,date);val assignable=(total-unavailable).coerceAtLeast(0);val activeStaff=staff.countByCompany_IdAndStatusAndIsDeletedFalse(cid,EntityStatus.ACTIVE);val staffWithDesk=assignments.countAssignedStaff(ids,date);return WorkplaceSummary(total,assigned,(assignable-assigned).coerceAtLeast(0),unavailable,(activeStaff-staffWithDesk).coerceAtLeast(0),if(assignable==0L)0.0 else assigned*100.0/assignable)}
 
  @Transactional fun archive(kind:String,id:Long){when(kind){"offices"->{val e=ownedOffice(id);if(buildings.existsByOffice_IdAndIsDeletedFalse(id))throw ConflictException("Archive buildings before archiving this office");e.markDeleted();offices.save(e)};"buildings"->{val e=ownedBuilding(id);if(floors.existsByBuilding_IdAndIsDeletedFalse(id))throw ConflictException("Archive floors before archiving this building");e.markDeleted();buildings.save(e)};"floors"->{val e=ownedFloor(id);if(desks.findAllByFloor_IdAndIsDeletedFalseOrderByCode(id).any{current(it)!=null})throw ConflictException("Release active desk assignments before archiving this floor");e.markDeleted();floors.save(e)};"zones"->{val e=ownedZone(id);e.markDeleted();zones.save(e)};"desks"->{archiveDesk(ownedDesk(id));return};else->throw BadRequestException("Unsupported workplace resource")};recordFromKind(kind,id,AuditAction.DELETE)}
  @Transactional fun restore(kind:String,id:Long){when(kind){"offices"->offices.findById(id).orElseThrow{ResourceNotFoundException("Office",id)}.also{scope(it.company.id!!);it.restore();offices.save(it)};"buildings"->buildings.findById(id).orElseThrow{ResourceNotFoundException("Building",id)}.also{scope(company(it));it.restore();buildings.save(it)};"floors"->floors.findById(id).orElseThrow{ResourceNotFoundException("Floor",id)}.also{scope(company(it));it.restore();floors.save(it)};"zones"->zones.findById(id).orElseThrow{ResourceNotFoundException("Zone",id)}.also{scope(company(it.floor));it.restore();zones.save(it)};"desks"->desks.findById(id).orElseThrow{ResourceNotFoundException("Desk",id)}.also{scope(company(it));it.restore();desks.save(it)};else->throw BadRequestException("Unsupported workplace resource")};recordFromKind(kind,id,AuditAction.RESTORE)}
@@ -103,8 +110,29 @@ class WorkplaceService(
  // `flags` turns the include-archived toggle into the set of is_deleted values a query may return.
  private fun flags(includeDeleted:Boolean)=if(includeDeleted)listOf(false,true) else listOf(false)
  /** Runs the all-company query for a super admin and the company-scoped query for everyone else. */
- private fun <T> scopedList(includeDeleted:Boolean,all:(Collection<Boolean>)->List<T>,scoped:(Long,Collection<Boolean>)->List<T>):List<T>{val f=flags(includeDeleted);val cid=principalCompany();return if(cid==null)all(f) else scoped(cid,f)}
- private fun principalCompany():Long?{val p=SecurityUtils.currentPrincipal();return if(p.role==Role.SUPER_ADMIN)null else p.companyId?:throw ForbiddenException()}
+ private fun <T> scopedList(includeDeleted:Boolean,all:(Collection<Boolean>)->List<T>,scoped:(Collection<Long>,Collection<Boolean>)->List<T>):List<T>{val f=flags(includeDeleted);val ids=principalCompanies();return if(ids==null)all(f) else scoped(ids,f)}
+
+ /**
+  * Companies whose workplace records the caller may read: null for a super
+  * admin (everything), otherwise the caller's own company plus the companies
+  * above it in the group.
+  *
+  * Premises registered against the holding company are shared group assets —
+  * everyone beneath it works in them, so everyone can see them. Visibility only
+  * flows downward: a sister concern's own offices stay private to it and are not
+  * exposed to its siblings. Writes remain restricted to the owning company.
+  */
+ private fun principalCompanies():Collection<Long>?{val p=SecurityUtils.currentPrincipal();if(p.role==Role.SUPER_ADMIN)return null;return sharedWith(p.companyId?:throw ForbiddenException())}
+ private fun readScope(companyId:Long){val ids=principalCompanies()?:return;if(companyId !in ids)throw ForbiddenException()}
+ private fun readableFloor(id:Long)=floors.findById(id).filter{!it.isDeleted}.orElseThrow{ResourceNotFoundException("Floor",id)}.also{readScope(company(it))}
+
+ /** The company itself plus every company above it, up to the holding company. */
+ private fun sharedWith(companyId:Long):Set<Long>{
+  val ids=linkedSetOf(companyId)
+  var current=companies.findById(companyId).orElse(null)?.parentCompany
+  while(current!=null){val id=current.id?:break;if(!ids.add(id))break;current=current.parentCompany}
+  return ids
+ }
  /** Active assignments and position titles for a set of desks, resolved in two queries rather than per desk. */
  private fun assignmentContext(list:List<Desk>):MapContext{val ids=list.mapNotNull{it.id};if(ids.isEmpty())return MapContext(emptyMap(),emptyMap());val active=assignments.activeForDesks(ids,LocalDate.now(clock));return MapContext(active.associateBy{it.desk.id!!},positionTitles(active.mapNotNull{it.staff.id}))}
  private fun positionTitles(staffIds:List<Long>):Map<Long,String>{val ids=staffIds.distinct();if(ids.isEmpty())return emptyMap();return positions.findAllByStaff_IdInAndIsDeletedFalse(ids).mapNotNull{p->p.staff?.id?.let{it to p.title}}.toMap()}
@@ -113,7 +141,7 @@ class WorkplaceService(
  // ---- single-record reads -----------------------------------------------------------------
  fun getOffice(id:Long)=office(ownedOffice(id))
  fun getBuilding(id:Long)=building(ownedBuilding(id))
- fun getFloor(id:Long)=floor(ownedFloor(id))
+ fun getFloor(id:Long)=floor(readableFloor(id))
  fun getZone(id:Long)=zone(ownedZone(id))
  fun getDesk(id:Long)=ownedDesk(id).let{desk(it,current(it))}
 
@@ -122,7 +150,7 @@ class WorkplaceService(
   * telephone extension. Matching runs on the server so a viewer never needs the full staff list.
   */
  fun searchFloor(floorId:Long,query:String):List<WorkplaceSearchResult>{
-  ownedFloor(floorId);val q=query.trim().lowercase();if(q.isEmpty())return emptyList()
+  readableFloor(floorId);val q=query.trim().lowercase();if(q.isEmpty())return emptyList()
   val list=desks.findByFloor(floorId,flags(false));val ctx=assignmentContext(list)
   return list.mapNotNull{d->
    val a=ctx.byDesk[d.id];val title=a?.staff?.id?.let{ctx.titles[it]}?:a?.staff?.title

@@ -29,6 +29,7 @@ interface StaffRepository : JpaRepository<Staff, Long>, JpaSpecificationExecutor
     fun existsByCompany_IdAndEmployeeCodeIgnoreCaseAndIdNot(companyId: Long, employeeCode: String, id: Long): Boolean
     fun findAllByManager_IdAndIsDeletedFalse(managerId: Long): List<Staff>
     fun countByCompany_IdAndStatusAndIsDeletedFalse(companyId: Long, status: EntityStatus): Long
+    fun countByCompany_IdInAndStatusAndIsDeletedFalse(companyIds: Collection<Long>, status: EntityStatus): Long
 }
 interface StaffCompanyAssignmentRepository : JpaRepository<StaffCompanyAssignment, Long> {
     @EntityGraph(attributePaths = ["staff", "company", "department", "manager"])

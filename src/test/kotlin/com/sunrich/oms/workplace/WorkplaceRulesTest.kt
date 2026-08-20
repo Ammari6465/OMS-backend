@@ -71,8 +71,10 @@ class WorkplaceRulesTest{
   val scoped=users.save(User("sc-${System.nanoTime()}","sc-${System.nanoTime()}@example.com","hash",Role.COMPANY_ADMIN,"Scoped",companyId=company))
   auth(scoped)
   val visible=service.listOffices(null,false)
+  // A sibling company's office stays hidden; premises inherited from the
+  // holding company above may legitimately appear alongside the caller's own.
   assertThat(visible.map{it.id}).contains(office).doesNotContain(otherOffice)
-  assertThat(service.listDesks(null,false).map{it.id}).containsExactlyInAnyOrder(desk,desk2)
+  assertThat(service.listDesks(null,false).map{it.id}).contains(desk,desk2)
  }
 
  // ---- floor search ---------------------------------------------------------------------------
@@ -175,14 +177,17 @@ class WorkplaceRulesTest{
 
  // ---- summary -----------------------------------------------------------------------------------------------
  @Test fun `summary counts desks assignments and staff without a desk`(){
+  // Measured as deltas: the summary also counts shared premises inherited from
+  // the holding company, which this fixture does not control.
+  val base=service.summary(company)
   service.createDesk(deskRequest("F3-029",30,10).copy(mode=DeskMode.UNAVAILABLE))
   service.assign(AssignmentRequest(desk,staffId,LocalDate.now(),reason="Permanent desk"))
   val s=service.summary(company)
-  assertThat(s.totalDesks).isEqualTo(3)
-  assertThat(s.unavailableDesks).isEqualTo(1)
-  assertThat(s.assignedDesks).isEqualTo(1)
-  assertThat(s.availableDesks).isEqualTo(1)
-  assertThat(s.staffWithoutDesks).isEqualTo(0)
+  assertThat(s.totalDesks).isEqualTo(base.totalDesks+1)
+  assertThat(s.unavailableDesks).isEqualTo(base.unavailableDesks+1)
+  assertThat(s.assignedDesks).isEqualTo(base.assignedDesks+1)
+  assertThat(s.availableDesks).isEqualTo(base.availableDesks-1)
+  assertThat(s.staffWithoutDesks).isEqualTo(base.staffWithoutDesks-1)
   assertThat(s.utilizationPercent).isEqualTo(50.0)
  }
 

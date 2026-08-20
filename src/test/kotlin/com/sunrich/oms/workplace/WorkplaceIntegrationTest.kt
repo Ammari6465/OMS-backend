@@ -51,6 +51,37 @@ class WorkplaceIntegrationTest{
   assertThat(service.map(floor).floor.hasPlan).isFalse()
   assertThatThrownBy{service.plan(floor)}.isInstanceOf(ResourceNotFoundException::class.java)
  }
+ @Test fun `read-only user of a sister concern sees the holding company shared premises`(){
+  // Premises registered against the holding company are shared group assets, so
+  // a viewer at a sister concern must be able to find a desk in them.
+  val n=System.nanoTime()
+  val holding=org.listCompanies(false).first{it.isGroupParent}.id
+  val concern=org.listCompanies(false).first{it.parentCompanyId==holding}.id
+  val shared=service.createOffice(OfficeRequest(holding,"Group Head Office $n","GHO-$n".take(20),city="Colombo",country="Sri Lanka",timeZone="Asia/Colombo"))
+  val sharedBuilding=service.createBuilding(BuildingRequest(shared.id,"Group Tower","GT")).id
+  val sharedFloor=service.createFloor(FloorRequest(sharedBuilding,"Ground Floor",1)).id
+
+  auth(users.save(User("viewer-$n","viewer-$n@example.com","hash",Role.READ_ONLY,"Viewer",companyId=concern)))
+
+  assertThat(service.listOffices(null)).extracting<Long>{it.id}.contains(shared.id)
+  assertThat(service.listFloors(null)).extracting<Long>{it.id}.contains(sharedFloor)
+  assertThat(service.map(sharedFloor).floor.name).isEqualTo("Ground Floor")
+ }
+ @Test fun `a sister concern private office is not exposed to its siblings`(){
+  // Two concerns under the same holding company: neither is an ancestor of the
+  // other, so visibility must not leak sideways.
+  val n=System.nanoTime()
+  val left=org.createCompany(CompanyRequest(name="Left Concern $n")).id
+  val right=org.createCompany(CompanyRequest(name="Right Concern $n")).id
+  val private=service.createOffice(OfficeRequest(left,"Left Office $n","LO-$n".take(20),city="Colombo",country="Sri Lanka",timeZone="Asia/Colombo"))
+  val privateBuilding=service.createBuilding(BuildingRequest(private.id,"Left Tower","LT")).id
+  val privateFloor=service.createFloor(FloorRequest(privateBuilding,"Left Floor",1)).id
+
+  auth(users.save(User("sibling-$n","sibling-$n@example.com","hash",Role.READ_ONLY,"Sibling Viewer",companyId=right)))
+
+  assertThat(service.listOffices(null)).extracting<Long>{it.id}.doesNotContain(private.id)
+  assertThatThrownBy{service.map(privateFloor)}.isInstanceOf(ForbiddenException::class.java)
+ }
  @Test fun `company admin cannot view another company floor`(){val scoped=users.save(User("scoped-${System.nanoTime()}","scoped-${System.nanoTime()}@example.com","hash",Role.COMPANY_ADMIN,"Scoped",companyId=otherCompany));auth(scoped);assertThatThrownBy{service.map(floor)}.isInstanceOf(ForbiddenException::class.java)}
  @Test @Transactional(propagation=Propagation.NOT_SUPPORTED) fun `summary works without an open persistence session`(){service.assign(AssignmentRequest(desk,staffId,LocalDate.now(),reason="Permanent desk"));assertThat(service.summary(company)).isEqualTo(WorkplaceSummary(2,1,1,0,0,50.0))}
  private fun deskRequest(code:String,x:Int,y:Int)=DeskRequest(floor,code=code,x=BigDecimal(x),y=BigDecimal(y),width=BigDecimal("4"),height=BigDecimal("3"))
