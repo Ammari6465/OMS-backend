@@ -20,6 +20,21 @@ class FloorPlanStorage(
 ){
  private val root=Paths.get(directory).toAbsolutePath().normalize().also{Files.createDirectories(it)}
 
+ init{
+  // Uploaded plans live on disk while their metadata lives in the database. On
+  // a container without a persistent mount here, every restart silently drops
+  // the images and leaves floors pointing at files that no longer exist, so the
+  // resolved path is logged where it can be checked against the mount.
+  val log=org.slf4j.LoggerFactory.getLogger(javaClass)
+  val mount=System.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+  val existing=runCatching{Files.list(root).use{it.count()}}.getOrDefault(0L)
+  if(mount!=null&&Paths.get(mount).toAbsolutePath().normalize()!=root){
+   log.warn("Floor plans are stored at {} but the persistent volume is mounted at {}. Uploads will be lost on restart.",root,mount)
+  }else{
+   log.info("Floor plan storage at {} ({} files, persistent volume: {})",root,existing,mount!=null)
+  }
+ }
+
  fun store(file:MultipartFile):StoredPlan{
   if(file.isEmpty)throw BadRequestException("Floor plan file is empty");if(file.size>maxBytes)throw BadRequestException("Floor plan exceeds the configured size limit")
   val bytes=file.bytes;val detected=detect(bytes,file.contentType);val ext=when(detected){"image/png"->"png";"image/jpeg"->"jpg";else->"svg"}
