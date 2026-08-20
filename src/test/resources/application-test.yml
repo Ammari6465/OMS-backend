@@ -19,6 +19,10 @@ spring:
 
 # Deterministic security config for the auth tests
 oms:
+  workplace:
+    # Keep uploaded plan images out of the working directory; the default
+    # ./data/workplace-plans is a real folder in the repository.
+    storage-directory: ${java.io.tmpdir}/oms-test-workplace-plans
   security:
     jwt:
       secret: test-secret-key-that-is-at-least-32-bytes-long!!

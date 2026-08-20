@@ -38,5 +38,15 @@ class FloorPlanStorageTest{
   val uuid="00000000-0000-0000-0000-000000000001.png"
   assertThatThrownBy{s.read(uuid)}.isInstanceOf(ResourceNotFoundException::class.java)
  }
+ @Test fun `exists reports stored files and never throws on missing or invalid references`(){
+  val s=storage()
+  val saved=s.store(MockMultipartFile("file","plan.svg","image/svg+xml","<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"/>".toByteArray()))
+  assertThat(s.exists(saved.reference)).isTrue()
+  assertThat(s.exists("00000000-0000-0000-0000-000000000001.png")).isFalse()
+  // A dangling or malformed reference must degrade to "no plan", not blow up
+  // the floor listing that asks about it.
+  assertThat(s.exists("../secret.svg")).isFalse()
+  assertThat(s.exists(null)).isFalse()
+ }
 }
 

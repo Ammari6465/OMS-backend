@@ -23,6 +23,7 @@ class WorkplaceService(
  private val storage:FloorPlanStorage,private val audit:AuditTrailService,private val notifications:NotificationDeliveryService,private val clock:Clock,
  @Value("\${oms.workplace.hide-staff-names:false}")private val hideNames:Boolean
 ){
+ private val log=org.slf4j.LoggerFactory.getLogger(javaClass)
  fun listOffices(companyId:Long?,includeDeleted:Boolean=false):List<OfficeResponse>{val f=flags(includeDeleted);val cid=principalCompany()?:companyId;val list=if(cid==null)offices.findAllScoped(f) else offices.findCompanyScoped(cid,f);return list.filter{companyId==null||it.company.id==companyId}.map(::office)}
  fun listBuildings(officeId:Long?,includeDeleted:Boolean=false)=scopedList(includeDeleted,buildings::findAllScoped,buildings::findCompanyScoped).filter{officeId==null||it.office.id==officeId}.map(::building)
  fun listFloors(buildingId:Long?,includeDeleted:Boolean=false)=scopedList(includeDeleted,floors::findAllScoped,floors::findCompanyScoped).filter{buildingId==null||it.building.id==buildingId}.map(::floor)
@@ -82,7 +83,16 @@ class WorkplaceService(
  private fun company(b:Building)=b.office.company.id!!;private fun company(f:Floor)=f.building.office.company.id!!;private fun company(d:Desk)=company(d.floor);private fun company(o:Office)=o.company.id!!
  private fun office(e:Office)=OfficeResponse(e.id!!,e.version,e.company.id!!,e.company.name,e.name,e.code,e.address,e.city,e.country,e.timeZone,e.status,e.isDeleted)
  private fun building(e:Building)=BuildingResponse(e.id!!,e.version,e.office.id!!,e.office.name,e.office.company.id!!,e.name,e.code,e.description,e.status,e.isDeleted)
- private fun floor(e:Floor)=FloorResponse(e.id!!,e.version,e.building.id!!,e.building.name,e.building.office.id!!,e.building.office.name,e.building.office.company.id!!,e.building.office.company.name,e.name,e.displayOrder,e.planStorageRef!=null,e.planOriginalName,e.planMediaType,e.planWidth,e.planHeight,e.status,e.isDeleted)
+ // hasPlan reports whether the image can actually be served, not merely whether
+ // the row still carries a reference: a plan whose file is gone must not be
+ // advertised, or clients request it and get a 404 they cannot act on.
+ private fun floor(e:Floor)=FloorResponse(e.id!!,e.version,e.building.id!!,e.building.name,e.building.office.id!!,e.building.office.name,e.building.office.company.id!!,e.building.office.company.name,e.name,e.displayOrder,planAvailable(e),e.planOriginalName,e.planMediaType,e.planWidth,e.planHeight,e.status,e.isDeleted)
+ private fun planAvailable(e:Floor):Boolean{
+  val ref=e.planStorageRef?:return false
+  if(storage.exists(ref))return true
+  log.warn("Floor {} references floor plan '{}' but the stored file is missing; serving desks without a plan",e.id,ref)
+  return false
+ }
  private fun zone(e:Zone)=ZoneResponse(e.id!!,e.version,e.floor.id!!,e.name,e.code,e.colour,e.description,e.status,e.isDeleted)
  private fun desk(e:Desk,a:DeskAssignment?,titles:Map<Long,String>?=null)=DeskResponse(e.id!!,e.version,e.floor.id!!,e.zone?.id,e.zone?.name,e.code,e.displayName,e.mode,if(a!=null)DeskAvailability.ASSIGNED else e.availability,e.x,e.y,e.width,e.height,e.rotation,e.capacity,e.telephoneExtension,e.accessible,e.equipmentTags,e.notes,e.status,e.isDeleted,a?.let{assignment(it,titles)})
  private fun assignment(a:DeskAssignment,titles:Map<Long,String>?=null):AssignmentResponse{val show=namesVisible();val f=a.desk.floor;val title=if(titles!=null)titles[a.staff.id!!]?:a.staff.title else positions.findFirstByStaff_IdAndIsDeletedFalse(a.staff.id!!)?.title?:a.staff.title;return AssignmentResponse(a.id!!,a.version,a.desk.id!!,a.desk.code,f.id!!,f.name,f.building.name,f.building.office.name,a.desk.zone?.name,a.desk.telephoneExtension,a.staff.id!!,if(show)a.staff.name else null,if(show)a.staff.employeeCode else null,a.staff.department?.id,a.staff.department?.name,title,a.effectiveFrom,a.effectiveTo,a.primaryAssignment,a.assignmentReason,a.releaseReason)}

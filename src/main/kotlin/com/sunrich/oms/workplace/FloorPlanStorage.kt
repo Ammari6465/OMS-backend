@@ -30,6 +30,16 @@ class FloorPlanStorage(
 
  private fun rasterDimensions(bytes:ByteArray):Pair<Int,Int> = runCatching{ImageIO.read(bytes.inputStream())}.getOrNull()?.let{it.width to it.height} ?: throw BadRequestException("The floor plan image could not be read. Upload a valid PNG, JPEG, or SVG file")
 
+ /**
+  * Whether the stored file backing [reference] is actually present. Floor rows
+  * keep their plan metadata in the database while the image lives on disk, so
+  * the two can drift apart — a restore from a database-only backup, or a
+  * container rebuilt without its plan volume. Callers use this to report
+  * `hasPlan` honestly instead of handing out a link that 404s.
+  */
+ fun exists(reference:String?):Boolean =
+  reference!=null && runCatching{Files.exists(resolve(reference))}.getOrDefault(false)
+
  fun read(reference:String):ByteArray{
   val target=resolve(reference)
   if(!Files.exists(target))throw ResourceNotFoundException("Floor plan")
