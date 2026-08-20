@@ -79,6 +79,16 @@ oms:
     scheduler-delay-ms: ${LIFECYCLE_SCHEDULER_DELAY_MS:60000}
   workplace:
     storage-directory: ${WORKPLACE_STORAGE_DIRECTORY:./data/workplace-plans}
+    detection:
+      # Floor plan recognition. 'none' disables it entirely; 'vision' sends the
+      # plan image to the configured model. No key means no detection — the
+      # module reports nothing found rather than inventing desks.
+      provider: ${WORKPLACE_DETECTION_PROVIDER:none}
+      api-key: ${WORKPLACE_DETECTION_API_KEY:}
+      base-url: ${WORKPLACE_DETECTION_BASE_URL:https://api.anthropic.com/v1}
+      model: ${WORKPLACE_DETECTION_MODEL:claude-sonnet-5}
+      api-style: ${WORKPLACE_DETECTION_API_STYLE:anthropic}
+      max-objects: ${WORKPLACE_DETECTION_MAX_OBJECTS:400}
     max-plan-bytes: ${WORKPLACE_MAX_PLAN_BYTES:10485760}
     hide-staff-names: ${WORKPLACE_HIDE_STAFF_NAMES:false}
   cors:

@@ -60,7 +60,11 @@ class WorkplaceService(
   // zero desks while shared premises are on screen. Staff, though, are counted
   // for the selected company alone: people belong to one company even when the
   // building they sit in is shared.
-  val cid=scopedCompany(companyId);val ids=sharedWith(cid);val date=LocalDate.now(clock);val total=desks.countByFloor_Building_Office_Company_IdInAndIsDeletedFalse(ids);val unavailable=desks.countUnavailable(ids,DeskMode.UNAVAILABLE,DeskAvailability.UNAVAILABLE);val assigned=assignments.countActive(ids,date);val assignable=(total-unavailable).coerceAtLeast(0);val activeStaff=staff.countByCompany_IdAndStatusAndIsDeletedFalse(cid,EntityStatus.ACTIVE);val staffWithDesk=assignments.countAssignedStaff(ids,date);return WorkplaceSummary(total,assigned,(assignable-assigned).coerceAtLeast(0),unavailable,(activeStaff-staffWithDesk).coerceAtLeast(0),if(assignable==0L)0.0 else assigned*100.0/assignable)}
+  val cid=scopedCompany(companyId);val ids=sharedWith(cid);val date=LocalDate.now(clock);val total=desks.countByFloor_Building_Office_Company_IdInAndIsDeletedFalse(ids);val unavailable=desks.countUnavailable(ids,DeskMode.UNAVAILABLE,DeskAvailability.UNAVAILABLE);val assigned=assignments.countActive(ids,date);val assignable=(total-unavailable).coerceAtLeast(0);val activeStaff=staff.countByCompany_IdAndStatusAndIsDeletedFalse(cid,EntityStatus.ACTIVE);
+  // Both halves of "staff without a desk" must count the same population, or
+  // people seated in shared premises would subtract from another company's
+  // headcount and drive the figure negative.
+  val staffWithDesk=assignments.countAssignedStaff(setOf(cid),date);return WorkplaceSummary(total,assigned,(assignable-assigned).coerceAtLeast(0),unavailable,(activeStaff-staffWithDesk).coerceAtLeast(0),if(assignable==0L)0.0 else assigned*100.0/assignable)}
 
  @Transactional fun archive(kind:String,id:Long){when(kind){"offices"->{val e=ownedOffice(id);if(buildings.existsByOffice_IdAndIsDeletedFalse(id))throw ConflictException("Archive buildings before archiving this office");e.markDeleted();offices.save(e)};"buildings"->{val e=ownedBuilding(id);if(floors.existsByBuilding_IdAndIsDeletedFalse(id))throw ConflictException("Archive floors before archiving this building");e.markDeleted();buildings.save(e)};"floors"->{val e=ownedFloor(id);if(desks.findAllByFloor_IdAndIsDeletedFalseOrderByCode(id).any{current(it)!=null})throw ConflictException("Release active desk assignments before archiving this floor");e.markDeleted();floors.save(e)};"zones"->{val e=ownedZone(id);e.markDeleted();zones.save(e)};"desks"->{archiveDesk(ownedDesk(id));return};else->throw BadRequestException("Unsupported workplace resource")};recordFromKind(kind,id,AuditAction.DELETE)}
  @Transactional fun restore(kind:String,id:Long){when(kind){"offices"->offices.findById(id).orElseThrow{ResourceNotFoundException("Office",id)}.also{scope(it.company.id!!);it.restore();offices.save(it)};"buildings"->buildings.findById(id).orElseThrow{ResourceNotFoundException("Building",id)}.also{scope(company(it));it.restore();buildings.save(it)};"floors"->floors.findById(id).orElseThrow{ResourceNotFoundException("Floor",id)}.also{scope(company(it));it.restore();floors.save(it)};"zones"->zones.findById(id).orElseThrow{ResourceNotFoundException("Zone",id)}.also{scope(company(it.floor));it.restore();zones.save(it)};"desks"->desks.findById(id).orElseThrow{ResourceNotFoundException("Desk",id)}.also{scope(company(it));it.restore();desks.save(it)};else->throw BadRequestException("Unsupported workplace resource")};recordFromKind(kind,id,AuditAction.RESTORE)}
@@ -142,6 +146,14 @@ class WorkplaceService(
  fun getOffice(id:Long)=office(ownedOffice(id))
  fun getBuilding(id:Long)=building(ownedBuilding(id))
  fun getFloor(id:Long)=floor(readableFloor(id))
+
+ // ---- seams for the floor plan detection module ---------------------------------------------
+ /** Floor the caller may view, honouring the group's shared-premises rules. */
+ fun requireReadableFloor(id:Long):Floor = readableFloor(id)
+ /** Floor the caller may modify: its own company only, never an inherited one. */
+ fun requireManageableFloor(id:Long):Floor = ownedFloor(id)
+ /** Records a floor-scoped audit entry on behalf of the detection module. */
+ fun recordFloorAudit(floorId:Long,action:AuditAction,detail:String){val f=floors.findById(floorId).orElseThrow{ResourceNotFoundException("Floor",floorId)};record(company(f),"Floor",floorId,action,null,detail)}
  fun getZone(id:Long)=zone(ownedZone(id))
  fun getDesk(id:Long)=ownedDesk(id).let{desk(it,current(it))}
 
