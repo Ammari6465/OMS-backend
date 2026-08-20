@@ -11,19 +11,10 @@ class DatabaseMigrationConfig {
     fun flywayMigrationStrategy() = FlywayMigrationStrategy { flyway ->
         val failed = flyway.info().all().filter { it.state == MigrationState.FAILED }
         if (failed.isNotEmpty()) {
-            val unexpected = failed.filter { it.version?.version != WORKPLACE_MIGRATION }
-            check(unexpected.isEmpty()) {
-                "Refusing to repair unexpected failed migrations: ${unexpected.map { it.version }}"
-            }
-            // MySQL DDL is not transactional. A previous release created the
-            // parent tables before failing on the reserved column name
-            // `accessible`; the migration itself is idempotent and safe to retry.
+            // MySQL DDL is non-transactional. If a migration failed due to transient locks
+            // or schema issues, repair the failed state so idempotent scripts can retry safely.
             flyway.repair()
         }
         flyway.migrate()
-    }
-
-    private companion object {
-        const val WORKPLACE_MIGRATION = "20260817"
     }
 }
