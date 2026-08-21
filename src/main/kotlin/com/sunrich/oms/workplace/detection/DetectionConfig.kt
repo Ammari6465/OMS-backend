@@ -27,6 +27,7 @@ class DetectionConfig {
         mapper: ObjectMapper
     ): FloorPlanDetector {
         val heuristic = HeuristicSvgFloorPlanDetector()
+        val rasterizer = SvgRasterizer()
         val vision = if (props.provider.equals("vision", ignoreCase = true) && props.apiKey.isNotBlank()) {
             VisionFloorPlanDetector(props, restClientBuilder, mapper)
         } else null
@@ -49,22 +50,31 @@ class DetectionConfig {
                 heuristic.supports(image) || vision?.supports(image) == true
 
             override fun detect(image: PlanImage): List<DetectionCandidate> {
+                var forVision = image
                 if (heuristic.supports(image)) {
-                    // A broken SVG is worth reporting rather than swallowing —
-                    // unless a vision engine can still read the file, in which
-                    // case try that before giving up on the plan.
+                    // A broken or uninterpretable SVG is worth reporting rather
+                    // than swallowing — but only once rasterising has been tried,
+                    // because a vision engine can read a picture of the plan even
+                    // when the markup itself carries no usable structure.
                     val heuristicResults = try {
                         heuristic.detect(image)
                     } catch (ex: UnreadablePlanException) {
-                        if (vision?.supports(image) != true) throw ex
-                        log.info("SVG parse failed ({}); falling back to the vision detector", ex.message)
+                        forVision = rasterize(image) ?: throw ex
+                        log.info("SVG unusable ({}); rasterised it for the vision detector", ex.message)
                         emptyList()
                     }
                     if (heuristicResults.isNotEmpty()) return heuristicResults
+                    // Parsed cleanly but found nothing worth showing. A vector
+                    // plan drawn without rectangles looks identical to an empty
+                    // one here, so give vision the rendered image too.
+                    if (forVision === image && vision != null) {
+                        forVision = rasterize(image) ?: image
+                    }
                 }
                 if (vision == null) return emptyList()
+                if (!vision.supports(forVision)) return emptyList()
 
-                val result = vision.detect(image)
+                val result = vision.detect(forVision)
                 if (result.size >= MIN_OBJECTS) return result
 
                 // Too few objects — the preprocessor may have been too aggressive
@@ -79,7 +89,7 @@ class DetectionConfig {
                     val savedPreprocess = props.preprocess
                     try {
                         props.preprocess = false
-                        val retry = vision.detect(image)
+                        val retry = vision.detect(forVision)
                         if (retry.size > result.size) return retry
                     } finally {
                         props.preprocess = savedPreprocess
@@ -87,6 +97,10 @@ class DetectionConfig {
                 }
                 return result
             }
+
+            /** Renders a vector plan so the vision engine has something to look at. */
+            private fun rasterize(image: PlanImage): PlanImage? =
+                if (vision == null) null else rasterizer.toPng(image)
         }
     }
 

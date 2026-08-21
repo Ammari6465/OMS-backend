@@ -33,6 +33,23 @@ dependencies {
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.11.5")
     runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.11.5")
 
+    // Renders SVG plans to raster so a vision engine can read them. Vector
+    // plans are common and vision models take images only, so without this an
+    // SVG upload has no path to detection at all.
+    // xml-apis ships an ancient javax.xml that shadows the JDK's own and
+    // removes XMLConstants.ACCESS_EXTERNAL_DTD, which the plan sanitiser relies
+    // on to lock down SVG parsing. Batik works fine against the JDK classes.
+    implementation("org.apache.xmlgraphics:batik-transcoder:1.17") {
+        // Only the xml-apis module itself shadows the JDK; xml-apis-ext carries
+        // the SVG DOM interfaces Batik genuinely needs, so it has to stay.
+        exclude(group = "xml-apis", module = "xml-apis")
+    }
+    implementation("org.apache.xmlgraphics:batik-codec:1.17") {
+        // Only the xml-apis module itself shadows the JDK; xml-apis-ext carries
+        // the SVG DOM interfaces Batik genuinely needs, so it has to stay.
+        exclude(group = "xml-apis", module = "xml-apis")
+    }
+
     // Integrations used in later phases (FTP, CSV, PDF export)
     implementation("commons-net:commons-net:3.10.0")
     implementation("com.google.auth:google-auth-library-oauth2-http:1.43.0")
