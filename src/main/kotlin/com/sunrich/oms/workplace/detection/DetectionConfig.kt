@@ -33,7 +33,16 @@ class DetectionConfig {
 
         return object : FloorPlanDetector {
             override val name: String get() = vision?.name ?: heuristic.name
-            override val available: Boolean get() = true
+
+            // The heuristic engine is always present, so something can always
+            // run. Reporting a blanket `true` here, though, meant the service's
+            // "recognition is not configured" message could never fire and an
+            // unconfigured deployment only ever explained itself through
+            // downstream errors about individual files.
+            override val available: Boolean get() = heuristic.available || vision?.available == true
+
+            override val readableMediaTypes: Set<String>
+                get() = heuristic.readableMediaTypes + (vision?.readableMediaTypes ?: emptySet())
 
             /** Readable if either engine can actually open this file. */
             override fun supports(image: PlanImage) =

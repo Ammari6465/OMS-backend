@@ -62,6 +62,8 @@ class VisionFloorPlanDetector(
     override val name = "vision:${props.model}"
     override val available get() = props.apiKey.isNotBlank()
 
+    override val readableMediaTypes get() = if (available) SUPPORTED_IMAGE_TYPES else emptySet()
+
     /** Raster formats only; PDFs and SVGs would need rasterising first. */
     override fun supports(image: PlanImage) =
         available && SUPPORTED_IMAGE_TYPES.contains(image.mediaType)

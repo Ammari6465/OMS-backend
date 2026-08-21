@@ -54,3 +54,19 @@ data class DetectionRunResponse(
 
 /** Result of turning detected desks into real Desk records. */
 data class DeskPromotionResponse(val created: Int, val skipped: Int, val deskIds: List<Long>)
+
+/**
+ * What the recognition pipeline can currently do, so the UI can say so before
+ * a scan rather than after one fails.
+ *
+ * Without this the only way to discover that vision detection is unconfigured
+ * is to upload a raster plan and read the error, which sends people round a
+ * loop between two formats neither of which the server can read.
+ */
+data class DetectionStatusResponse(
+    val detector: String,
+    val available: Boolean,
+    /** True once a vision provider and key are set; raster plans need this. */
+    val visionConfigured: Boolean,
+    val readableMediaTypes: List<String>
+)

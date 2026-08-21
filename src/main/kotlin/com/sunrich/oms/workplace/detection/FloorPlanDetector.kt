@@ -58,6 +58,16 @@ interface FloorPlanDetector {
      */
     fun supports(image: PlanImage): Boolean = true
 
+    /**
+     * Media types this engine can read, for telling a user what will work
+     * before they upload rather than after they scan.
+     *
+     * [supports] answers the same question about one file, but only once that
+     * file exists on the server. Without this the UI has no way to know that a
+     * PNG is unreadable until someone uploads one and gets an error back.
+     */
+    val readableMediaTypes: Set<String> get() = emptySet()
+
     fun detect(image: PlanImage): List<DetectionCandidate>
 }
 

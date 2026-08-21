@@ -17,6 +17,8 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
     override val name = "heuristic:svg"
     override val available = true
 
+    override val readableMediaTypes = setOf("image/svg+xml")
+
     /** Reads SVG markup only — a raster plan is invisible to this engine. */
     override fun supports(image: PlanImage) =
         image.mediaType == "image/svg+xml" || SvgSource.looksLikeSvg(image.bytes)

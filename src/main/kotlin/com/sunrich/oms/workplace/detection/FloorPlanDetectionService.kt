@@ -28,6 +28,21 @@ class FloorPlanDetectionService(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
+    /**
+     * Reports what recognition can do right now. Cheap and floor-independent,
+     * so the UI can gate the scan button instead of letting a person discover
+     * the gap by uploading a file the server cannot read.
+     */
+    fun status(): DetectionStatusResponse {
+        val readable = detector.readableMediaTypes
+        return DetectionStatusResponse(
+            detector = detector.name,
+            available = detector.available,
+            visionConfigured = readable.any { it != "image/svg+xml" },
+            readableMediaTypes = readable.sorted()
+        )
+    }
+
     @Transactional(readOnly = true)
     fun list(floorId: Long): List<DetectedObjectResponse> {
         workplace.requireReadableFloor(floorId)

@@ -13,6 +13,15 @@ private const val MANAGE = "hasAnyRole('SUPER_ADMIN','COMPANY_ADMIN')"
  * company.
  */
 @RestController
+@RequestMapping("/workplaces")
+class DetectionStatusController(private val service: FloorPlanDetectionService) {
+
+    /** Floor-independent: what recognition can read on this deployment. */
+    @GetMapping("/detection/status")
+    fun status() = ApiResponse.ok(service.status())
+}
+
+@RestController
 @RequestMapping("/workplaces/floors/{floorId}")
 class DetectionController(private val service: FloorPlanDetectionService) {
 
