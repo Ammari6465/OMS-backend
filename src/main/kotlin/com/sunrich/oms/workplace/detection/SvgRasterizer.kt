@@ -67,6 +67,16 @@ class SvgRasterizer(private val maxEdge: Int = MAX_EDGE) {
         } catch (ex: TranscoderException) {
             log.warn("Could not rasterise {}: {}", image.originalName, ex.message)
             null
+        } catch (ex: LinkageError) {
+            // Java2D is native underneath. A runtime image without fontconfig
+            // or freetype fails here rather than at boot, and a LinkageError is
+            // not an Exception — uncaught, it would take down a scan that the
+            // SVG parser could still have answered on its own.
+            log.error(
+                "Rasterising is unavailable: the runtime image is missing native graphics libraries ({})",
+                ex.message
+            )
+            null
         } catch (ex: Exception) {
             // Batik reaches for AWT, fonts and image codecs; a headless
             // container can fail in ways that are not TranscoderException.

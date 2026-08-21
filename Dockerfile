@@ -11,6 +11,14 @@ RUN ./gradlew bootJar --no-daemon
 
 FROM eclipse-temurin:17-jre-alpine
 
+# Java2D needs these natively, and this image does not carry them. Floor plan
+# recognition rasterises SVG plans through Batik, which drives Java2D; without
+# fontconfig and freetype on musl the JVM does not throw, it dies — SIGSEGV,
+# no Java exception, no shutdown log, which reads as an unexplained restart
+# and 502s mid-scan. A font must be present too, because Batik measures text
+# while building the render tree even when the drawing has no visible labels.
+RUN apk add --no-cache fontconfig freetype ttf-dejavu
+
 WORKDIR /app
 
 COPY --from=builder /app/build/libs/oms-backend-*.jar app.jar
@@ -36,4 +44,6 @@ EXPOSE 8080
 # process. At 50% the heap fills first, which raises a catchable
 # OutOfMemoryError and fails that one request instead of taking the app down
 # for everyone.
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=50.0", "-jar", "/app/app.jar"]
+# Headless is stated rather than assumed: Java2D reaching for a display in a
+# container is another way rasterising fails at runtime instead of at boot.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=50.0", "-Djava.awt.headless=true", "-jar", "/app/app.jar"]
