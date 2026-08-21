@@ -63,7 +63,7 @@ class SvgRasterizer(private val maxEdge: Int = MAX_EDGE) {
                 image.originalName, image.bytes.size / 1024, png.size / 1024,
                 System.currentTimeMillis() - started
             )
-            PlanImage(png, "image/png", image.originalName, image.width, image.height)
+            PlanImage(png, "image/png", image.originalName, image.width, image.height, prepared = true)
         } catch (ex: TranscoderException) {
             log.warn("Could not rasterise {}: {}", image.originalName, ex.message)
             null
@@ -77,10 +77,12 @@ class SvgRasterizer(private val maxEdge: Int = MAX_EDGE) {
 
     private companion object {
         /**
-         * Longest rendered edge. Matches the preprocessor's own ceiling, so a
-         * plan is not rendered large only to be scaled straight back down.
+         * Longest rendered edge. Well under the preprocessor's own ceiling: a
+         * vision model reads a floor plan comfortably at this size, and every
+         * pixel above it costs four bytes of buffer on a container that runs
+         * within a few hundred megabytes of its limit.
          */
-        const val MAX_EDGE = 2200
+        const val MAX_EDGE = 1600
         const val INITIAL_BUFFER = 512 * 1024
     }
 }

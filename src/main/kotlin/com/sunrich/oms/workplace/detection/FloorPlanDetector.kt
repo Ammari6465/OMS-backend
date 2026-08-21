@@ -23,7 +23,14 @@ data class PlanImage(
     val mediaType: String,
     val originalName: String,
     val width: Int?,
-    val height: Int?
+    val height: Int?,
+    /**
+     * True when this image was produced by the server rather than uploaded —
+     * a rasterised vector plan. Such an image is already clean line art at the
+     * size the model wants, so running it through the preprocessor again only
+     * costs several full-size buffers on a container that has none to spare.
+     */
+    val prepared: Boolean = false
 ) {
     // ByteArray gives these structural equality, which the data class would
     // otherwise get wrong by comparing references.

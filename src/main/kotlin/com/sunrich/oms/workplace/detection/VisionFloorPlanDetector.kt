@@ -79,7 +79,10 @@ class VisionFloorPlanDetector(
         // title bands and legends, which moves the frame the model reports
         // against, so every polygon is mapped back onto the uploaded plan
         // before it leaves this method.
-        val prepared = if (props.preprocess) preprocessor.clean(image) else null
+        // A plan the server rendered is already clean line art at the right
+        // size; preprocessing it again buys nothing and costs several full-size
+        // buffers, which is fatal on a container with little headroom.
+        val prepared = if (props.preprocess && !image.prepared) preprocessor.clean(image) else null
         return try {
             val content = request(prepared?.image ?: image)
             val candidates = parse(content).take(props.maxObjects)

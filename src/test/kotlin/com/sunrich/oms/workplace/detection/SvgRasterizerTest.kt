@@ -36,6 +36,17 @@ class SvgRasterizerTest {
         assertThat(maxOf(decoded.width, decoded.height)).isLessThanOrEqualTo(400)
     }
 
+    /**
+     * A rendered plan is already clean line art at the size the model wants.
+     * Marking it prepared keeps the preprocessor from decoding it into several
+     * more full-size buffers, which is what put the container over its 1GB
+     * limit part-way through a scan.
+     */
+    @Test
+    fun `marks the render as prepared so it is not preprocessed a second time`() {
+        assertThat(rasterizer.toPng(plan(simple, 800, 600))!!.prepared).isTrue()
+    }
+
     @Test
     fun `keeps the plan's aspect ratio so overlay coordinates still line up`() {
         val decoded = ImageIO.read(rasterizer.toPng(plan(simple, 800, 600))!!.bytes.inputStream())
