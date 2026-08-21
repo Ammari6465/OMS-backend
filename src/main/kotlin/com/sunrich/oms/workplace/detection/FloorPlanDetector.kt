@@ -47,6 +47,17 @@ interface FloorPlanDetector {
     /** Whether this detector is usable right now (configured, keyed, reachable). */
     val available: Boolean get() = true
 
+    /**
+     * Whether this engine can read this particular file at all.
+     *
+     * Distinct from [available] on purpose: an engine can be perfectly
+     * configured and still be unable to read a given format — the SVG parser
+     * cannot see a PNG, and a vision model cannot open a PDF. Without this,
+     * "nothing could read your file" is indistinguishable from "your plan
+     * contains nothing", and the user is told to draw the whole floor by hand.
+     */
+    fun supports(image: PlanImage): Boolean = true
+
     fun detect(image: PlanImage): List<DetectionCandidate>
 }
 

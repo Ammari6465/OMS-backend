@@ -14,8 +14,12 @@ object StubDetector : FloorPlanDetector {
     /** Lets a test simulate an unconfigured deployment. */
     var configured: Boolean = true
 
+    /** Lets a test simulate a file no engine can open, such as a raster PNG. */
+    var readable: Boolean = true
+
     override val name = "stub"
     override val available: Boolean get() = configured
+    override fun supports(image: PlanImage) = readable
     override fun detect(image: PlanImage) = candidates
 }
 

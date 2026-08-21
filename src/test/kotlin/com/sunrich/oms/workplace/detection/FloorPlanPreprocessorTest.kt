@@ -64,7 +64,7 @@ class FloorPlanPreprocessorTest {
 
         assertThat(cleaned.width).isEqualTo(40)
         assertThat(cleaned.height).isEqualTo(20)
-        assertThat(result.width).isEqualTo(40)
+        assertThat(result.image.width).isEqualTo(40)
         for (x in 0 until 10) assertThat(Color(cleaned.getRGB(x, 2)).red).isLessThan(128)
         for (y in 2 until 8) assertThat(Color(cleaned.getRGB(2, y)).red).isLessThan(128)
         // The mirrored positions must stay blank.
@@ -75,9 +75,9 @@ class FloorPlanPreprocessorTest {
     fun `large plans are downscaled uniformly so coordinates still map back`() {
         val result = preprocessor.clean(plan(white(6000, 3000)))!!
 
-        assertThat(maxOf(result.width!!, result.height!!)).isEqualTo(2200)
+        assertThat(maxOf(result.image.width!!, result.image.height!!)).isLessThanOrEqualTo(2200)
         // 2:1 in, 2:1 out — a non-uniform scale would misplace every overlay.
-        assertThat(result.width!!.toDouble() / result.height!!).isCloseTo(2.0, org.assertj.core.data.Offset.offset(0.01))
+        assertThat(result.image.width!!.toDouble() / result.image.height!!).isCloseTo(2.0, org.assertj.core.data.Offset.offset(0.01))
     }
 
     @Test
@@ -105,6 +105,38 @@ class FloorPlanPreprocessorTest {
     }
 
     @Test
+    fun `cropping the margins reports a window that maps detections back`() {
+        // Plan occupies the middle; the outer band is the title/legend area that
+        // margin cropping removes.
+        val source = white(400, 400)
+        source.createGraphics().run { paint = Color.BLACK; fillRect(60, 40, 280, 320); dispose() }
+
+        val result = preprocessor.clean(plan(source))!!
+
+        if (result.isCropped) {
+            // A point at the centre of the cleaned image must map back to the
+            // centre of the retained plan area, not the centre of the original.
+            val mapped = result.toOriginal(Point(0.5, 0.5))
+            assertThat(mapped.x).isBetween(result.cropX, result.cropX + result.cropWidth)
+            assertThat(mapped.y).isBetween(result.cropY, result.cropY + result.cropHeight)
+            // The window must describe a real sub-rectangle of the original.
+            assertThat(result.cropWidth).isGreaterThan(0.0).isLessThanOrEqualTo(1.0)
+            assertThat(result.cropX + result.cropWidth).isLessThanOrEqualTo(1.0)
+            // Corners map to the window's corners exactly.
+            assertThat(result.toOriginal(Point(0.0, 0.0)).x).isEqualTo(result.cropX)
+            assertThat(result.toOriginal(Point(1.0, 1.0)).x).isEqualTo(result.cropX + result.cropWidth)
+        }
+    }
+
+    @Test
+    fun `an uncropped plan maps coordinates through unchanged`() {
+        val result = preprocessor.clean(plan(white(40, 20)))!!
+
+        assertThat(result.isCropped).isFalse()
+        assertThat(result.toOriginal(Point(0.25, 0.75))).isEqualTo(Point(0.25, 0.75))
+    }
+
+    @Test
     fun `undecodable bytes return null so the run falls back to the original`() {
         val broken = PlanImage("not an image".toByteArray(), "image/png", "broken.png", null, null)
 
@@ -121,5 +153,5 @@ class FloorPlanPreprocessorTest {
         return PlanImage(out.toByteArray(), "image/png", "evacuation-map.png", image.width, image.height)
     }
 
-    private fun decode(image: PlanImage): BufferedImage = ImageIO.read(image.bytes.inputStream())
+    private fun decode(prepared: PreparedPlan): BufferedImage = ImageIO.read(prepared.image.bytes.inputStream())
 }

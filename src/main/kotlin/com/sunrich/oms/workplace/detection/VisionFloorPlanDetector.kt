@@ -55,6 +55,10 @@ class VisionFloorPlanDetector(
     override val name = "vision:${props.model}"
     override val available get() = props.apiKey.isNotBlank()
 
+    /** Raster formats only; PDFs and SVGs would need rasterising first. */
+    override fun supports(image: PlanImage) =
+        available && SUPPORTED_IMAGE_TYPES.contains(image.mediaType)
+
     override fun detect(image: PlanImage): List<DetectionCandidate> {
         if (!available) return emptyList()
         if (!SUPPORTED_IMAGE_TYPES.contains(image.mediaType)) {
@@ -62,13 +66,16 @@ class VisionFloorPlanDetector(
             log.warn("Floor plan media type {} cannot be sent to the vision model", image.mediaType)
             return emptyList()
         }
-        // Strip evacuation decoration first. Coordinates are unaffected: the
-        // cleaned image keeps the original aspect ratio and orientation, and
-        // results are normalised, so overlays land on the plan as uploaded.
-        val prepared = if (props.preprocess) preprocessor.clean(image) ?: image else image
+        // Strip evacuation decoration first. Preprocessing may also crop away
+        // title bands and legends, which moves the frame the model reports
+        // against, so every polygon is mapped back onto the uploaded plan
+        // before it leaves this method.
+        val prepared = if (props.preprocess) preprocessor.clean(image) else null
         return try {
-            val content = request(prepared)
-            parse(content).take(props.maxObjects)
+            val content = request(prepared?.image ?: image)
+            val candidates = parse(content).take(props.maxObjects)
+            if (prepared == null || !prepared.isCropped) candidates
+            else candidates.map { it.copy(polygon = prepared.toOriginal(it.polygon)) }
         } catch (ex: Exception) {
             log.warn("Floor plan detection failed for {}", image.originalName, ex)
             emptyList()

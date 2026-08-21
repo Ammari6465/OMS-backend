@@ -35,6 +35,10 @@ class DetectionConfig {
             override val name: String get() = vision?.name ?: heuristic.name
             override val available: Boolean get() = true
 
+            /** Readable if either engine can actually open this file. */
+            override fun supports(image: PlanImage) =
+                heuristic.supports(image) || vision?.supports(image) == true
+
             override fun detect(image: PlanImage): List<DetectionCandidate> {
                 if (image.mediaType == "image/svg+xml" || String(image.bytes, Charsets.UTF_8).contains("<svg", ignoreCase = true)) {
                     val heuristicResults = heuristic.detect(image)

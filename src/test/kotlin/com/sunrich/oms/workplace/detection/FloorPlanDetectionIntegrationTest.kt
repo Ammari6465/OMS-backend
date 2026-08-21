@@ -143,6 +143,21 @@ class FloorPlanDetectionIntegrationTest {
     }
 
     @Test
+    fun `a plan no engine can read is refused rather than reported as empty`() {
+        // The SVG parser cannot see a raster plan. Saying "nothing recognised"
+        // here sends the user off to draw a whole floor by hand over what is
+        // really a missing API key.
+        StubDetector.readable = false
+        try {
+            assertThatThrownBy { service.detect(floorId) }
+                .isInstanceOf(BadRequestException::class.java)
+                .hasMessageContaining("No detection engine can read")
+        } finally {
+            StubDetector.readable = true
+        }
+    }
+
+    @Test
     fun `detection is refused when no engine is configured`() {
         StubDetector.configured = false
         try {

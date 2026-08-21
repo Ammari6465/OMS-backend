@@ -18,6 +18,11 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
     override val name = "heuristic:svg"
     override val available = true
 
+    /** Reads SVG markup only — a raster plan is invisible to this engine. */
+    override fun supports(image: PlanImage) =
+        image.mediaType == "image/svg+xml" ||
+            String(image.bytes, Charsets.UTF_8).contains("<svg", ignoreCase = true)
+
     override fun detect(image: PlanImage): List<DetectionCandidate> {
         val content = String(image.bytes, Charsets.UTF_8).trim()
         if (!content.contains("<svg", ignoreCase = true)) {

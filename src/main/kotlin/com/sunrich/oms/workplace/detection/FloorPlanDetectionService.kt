@@ -48,12 +48,23 @@ class FloorPlanDetectionService(
             )
         }
         val (bytes, mediaType, originalName) = workplace.plan(floorId)
+        val image = PlanImage(bytes, mediaType, originalName, floor.planWidth, floor.planHeight)
+        // Refuse rather than report an empty scan. Returning "no objects found"
+        // when nothing could read the file sends the user off to draw an entire
+        // floor by hand over a problem that is one environment variable wide.
+        if (!detector.supports(image)) {
+            throw BadRequestException(
+                "No detection engine can read a $mediaType plan. " +
+                    "Set oms.workplace.detection.provider=vision and an API key to scan raster plans, " +
+                    "or upload the plan as SVG to use the built-in parser."
+            )
+        }
         val existing = objects.findAllByFloor_IdAndIsDeletedFalseOrderByIdAsc(floorId)
         val protected = existing.filter { it.isProtected }
         existing.filterNot { it.isProtected }.forEach { it.markDeleted() }
         objects.saveAll(existing)
 
-        val candidates = detector.detect(PlanImage(bytes, mediaType, originalName, floor.planWidth, floor.planHeight))
+        val candidates = detector.detect(image)
         val saved = objects.saveAll(numbered(candidates).map { (candidate, code) ->
             DetectedObject(
                 floor = floor,

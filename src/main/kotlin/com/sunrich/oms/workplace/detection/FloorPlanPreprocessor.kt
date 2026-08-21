@@ -33,6 +33,31 @@ import kotlin.math.roundToInt
  * orientation. No geometry is moved, mirrored, rotated or rescaled beyond an
  * optional uniform downscale, so coordinates map straight back onto the plan.
  */
+/**
+ * A cleaned plan plus the window it occupies in the original image.
+ *
+ * Cropping the margins changes what "0..1" means: a coordinate in the cleaned
+ * image is not the same coordinate in the plan the user uploaded. Overlays are
+ * drawn on the original, so detections must be mapped back through this window
+ * or every region lands offset and undersized.
+ */
+data class PreparedPlan(
+    val image: PlanImage,
+    val cropX: Double = 0.0,
+    val cropY: Double = 0.0,
+    val cropWidth: Double = 1.0,
+    val cropHeight: Double = 1.0
+) {
+    val isCropped get() = cropX != 0.0 || cropY != 0.0 || cropWidth != 1.0 || cropHeight != 1.0
+
+    /** Maps a point in the cleaned image back onto the original plan. */
+    fun toOriginal(point: Point) =
+        Point(cropX + point.x * cropWidth, cropY + point.y * cropHeight)
+
+    fun toOriginal(polygon: Polygon): Polygon =
+        if (!isCropped) polygon else Polygon.ofClamped(polygon.points.map(::toOriginal))
+}
+
 class FloorPlanPreprocessor(
     /** Above this saturation a pixel is decoration rather than linework. */
     private val saturationThreshold: Double = 0.22,
@@ -68,7 +93,7 @@ class FloorPlanPreprocessor(
      * Returns a cleaned PNG, or null when the image cannot be decoded — callers
      * then fall back to the original bytes rather than losing the run.
      */
-    fun clean(image: PlanImage): PlanImage? {
+    fun clean(image: PlanImage): PreparedPlan? {
         val source = runCatching { ImageIO.read(image.bytes.inputStream()) }.getOrNull()
         if (source == null) {
             log.warn("Floor plan {} could not be decoded for preprocessing", image.originalName)
@@ -78,25 +103,41 @@ class FloorPlanPreprocessor(
         var binary = binarise(scaled)
         // Advanced filters only help on real floor plans; they can destroy tiny
         // synthetic test images where the line is a single pixel wide.
+        var window = Window(0.0, 0.0, 1.0, 1.0)
         if (binary.width > MIN_FILTER_SIZE && binary.height > MIN_FILTER_SIZE) {
             binary = morphologicalClose(binary)
             binary = removeSmallClusters(binary)
-            binary = cropMargins(binary)
+            // The downscale is uniform, so normalised coordinates are unchanged
+            // by it; only the crop shifts the frame, and that shift is recorded
+            // so detections can be mapped back onto the uploaded plan.
+            val cropped = cropMargins(binary)
+            binary = cropped.image
+            window = cropped.window
         }
         val out = ByteArrayOutputStream()
         if (!ImageIO.write(binary, "png", out)) return null
         log.info(
-            "Preprocessed {} from {}x{} to {}x{} ({} -> {} bytes)",
+            "Preprocessed {} from {}x{} to {}x{} (crop {}, {} -> {} bytes)",
             image.originalName, source.width, source.height, binary.width, binary.height,
-            image.bytes.size, out.size()
+            window, image.bytes.size, out.size()
         )
-        return image.copy(
-            bytes = out.toByteArray(),
-            mediaType = "image/png",
-            width = binary.width,
-            height = binary.height
+        return PreparedPlan(
+            image = image.copy(
+                bytes = out.toByteArray(),
+                mediaType = "image/png",
+                width = binary.width,
+                height = binary.height
+            ),
+            cropX = window.x, cropY = window.y, cropWidth = window.width, cropHeight = window.height
         )
     }
+
+    /** Crop window as fractions of the pre-crop image. */
+    private data class Window(val x: Double, val y: Double, val width: Double, val height: Double) {
+        override fun toString() = "%.3f,%.3f %.3fx%.3f".format(x, y, width, height)
+    }
+
+    private data class CroppedImage(val image: BufferedImage, val window: Window)
 
     /** Uniform downscale only — aspect ratio and orientation are preserved. */
     private fun downscale(source: BufferedImage): BufferedImage {
@@ -257,9 +298,10 @@ class FloorPlanPreprocessor(
      * compass roses that sit outside the floor plan footprint. Scans inward
      * from each edge and trims rows/columns that are entirely white.
      */
-    private fun cropMargins(source: BufferedImage): BufferedImage {
+    private fun cropMargins(source: BufferedImage): CroppedImage {
         val w = source.width
         val h = source.height
+        val whole = CroppedImage(source, Window(0.0, 0.0, 1.0, 1.0))
         // At minimum keep 60% of each dimension to prevent over-cropping.
         val minMarginX = (w * marginScanFraction).toInt().coerceAtMost(w / 5)
         val minMarginY = (h * marginScanFraction).toInt().coerceAtMost(h / 5)
@@ -280,11 +322,14 @@ class FloorPlanPreprocessor(
         val cropH = bottom - top + 1
         if (cropW < w * 0.6 || cropH < h * 0.6) {
             // Cropping would remove too much — the plan probably fills the image.
-            return source
+            return whole
         }
-        if (cropW == w && cropH == h) return source
+        if (cropW == w && cropH == h) return whole
 
-        return source.getSubimage(left, top, cropW, cropH)
+        return CroppedImage(
+            source.getSubimage(left, top, cropW, cropH),
+            Window(left.toDouble() / w, top.toDouble() / h, cropW.toDouble() / w, cropH.toDouble() / h)
+        )
     }
 
     private fun isRowWhite(img: BufferedImage, y: Int): Boolean {
