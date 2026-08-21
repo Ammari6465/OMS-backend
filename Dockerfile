@@ -29,4 +29,11 @@ EXPOSE 8080
 # exactly that moment. Paired with ExitOnOutOfMemoryError that becomes an
 # instant, silent exit — indistinguishable from an external kill — so neither
 # flag is used here.
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=65.0", "-jar", "/app/app.jar"]
+# Lowered from 65% because floor plan recognition renders images. Batik and
+# Java2D allocate native buffers that sit outside the heap and outside
+# MaxRAMPercentage's reckoning, so a heap sized to 65% left too little of the
+# container for them: RSS crossed the limit mid-scan and the kernel killed the
+# process. At 50% the heap fills first, which raises a catchable
+# OutOfMemoryError and fails that one request instead of taking the app down
+# for everyone.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=50.0", "-jar", "/app/app.jar"]
