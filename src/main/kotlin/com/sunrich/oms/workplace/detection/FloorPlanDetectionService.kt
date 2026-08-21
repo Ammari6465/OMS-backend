@@ -48,6 +48,13 @@ class FloorPlanDetectionService(
             )
         }
         val (bytes, mediaType, originalName) = workplace.plan(floorId)
+        // Logged before the engine runs, so a scan that takes the process down
+        // still leaves behind what it was given. Without this, an OOM kill is a
+        // restart with no request attached to it.
+        log.info(
+            "Scanning floor {}: {} ({}, {} KB) with {}",
+            floorId, originalName, mediaType, bytes.size / 1024, detector.name
+        )
         val image = PlanImage(bytes, mediaType, originalName, floor.planWidth, floor.planHeight)
         // Refuse rather than report an empty scan. Returning "no objects found"
         // when nothing could read the file sends the user off to draw an entire

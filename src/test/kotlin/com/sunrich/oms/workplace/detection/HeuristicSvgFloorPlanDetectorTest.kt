@@ -72,6 +72,49 @@ class HeuristicSvgFloorPlanDetectorTest {
             .hasMessageContaining("could not be read as SVG")
     }
 
+    /**
+     * The production crash: a plan at the 10MB upload limit was DOM-parsed
+     * inside a heap-capped container, and the kernel killed the process
+     * part-way through the scan. Streaming keeps the cost proportional to the
+     * shapes kept, not the file, so this runs in a tight heap.
+     */
+    @Test
+    fun `scans a plan at the upload size limit without exhausting memory`() {
+        val body = StringBuilder(11 * 1024 * 1024)
+        body.append("""<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">""")
+        body.append("<text x=\"150\" y=\"150\">Conference Room</text>")
+        // Line-work: the bulk of a real CAD export, and none of it is a room.
+        while (body.length < 10 * 1024 * 1024) {
+            body.append("<path d=\"M0,0 L10,10 L20,20 L30,30 L40,40 L50,50 L60,60 Z\"/>")
+        }
+        body.append("<rect x=\"100\" y=\"100\" width=\"300\" height=\"200\"/></svg>")
+        val bytes = body.toString().toByteArray(StandardCharsets.UTF_8)
+        assertThat(bytes.size).isGreaterThan(10 * 1024 * 1024)
+
+        val runtime = Runtime.getRuntime()
+        System.gc()
+        val before = runtime.totalMemory() - runtime.freeMemory()
+        val found = detector.detect(plan(bytes))
+        val after = runtime.totalMemory() - runtime.freeMemory()
+
+        assertThat(found.map { it.type }).contains(DetectedObjectType.CONFERENCE_ROOM)
+        // A DOM of this document ran to many times the file size. Streaming
+        // should stay well under the size of the file itself.
+        assertThat(after - before).isLessThan(bytes.size.toLong())
+    }
+
+    @Test
+    fun `caps the shapes it keeps from a pathological plan`() {
+        val body = StringBuilder()
+        body.append("""<svg xmlns="http://www.w3.org/2000/svg" width="100000" height="100000">""")
+        repeat(30_000) { body.append("""<rect x="$it" y="$it" width="50" height="50"/>""") }
+        body.append("</svg>")
+
+        val found = detector.detect(plan(body.toString().toByteArray(StandardCharsets.UTF_8)))
+
+        assertThat(found.size).isLessThanOrEqualTo(20_000)
+    }
+
     @Test
     fun `ignores a raster plan rather than claiming it is empty markup`() {
         val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) + ByteArray(64)

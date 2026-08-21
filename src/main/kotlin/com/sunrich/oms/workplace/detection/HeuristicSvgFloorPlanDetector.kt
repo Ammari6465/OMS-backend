@@ -1,11 +1,9 @@
 package com.sunrich.oms.workplace.detection
 
 import org.slf4j.LoggerFactory
-import org.w3c.dom.Element
-import org.w3c.dom.NodeList
-import org.xml.sax.InputSource
-import java.io.StringReader
-import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.stream.XMLInputFactory
+import javax.xml.stream.XMLStreamConstants
+import javax.xml.stream.XMLStreamReader
 
 /**
  * High-speed algorithmic detector for SVG vector floor plans.
@@ -28,52 +26,22 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
             log.debug("Image is not an SVG file; skipping heuristic SVG detector")
             return emptyList()
         }
-        // Parse decoded text rather than raw bytes. Exports that declare one
-        // encoding and then write another are common enough that a byte-level
-        // parse fails on plans a person would call perfectly ordinary.
-        val xml = SvgSource.toXml(image.bytes)
         return try {
-            val factory = DocumentBuilderFactory.newInstance().apply {
-                isNamespaceAware = false
-                setFeature("http://apache.org/xml/features/disallow-doctype-decl", false)
-                setFeature("http://xml.org/sax/features/external-general-entities", false)
-                setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-            }
-            val builder = factory.newDocumentBuilder()
-            val doc = builder.parse(InputSource(StringReader(xml)))
-            val svg = doc.documentElement
-
-            var viewWidth = parseDim(svg.getAttribute("width"))
-            var viewHeight = parseDim(svg.getAttribute("height"))
-            val viewBox = svg.getAttribute("viewBox").trim()
-            if ((viewWidth <= 0 || viewHeight <= 0) && viewBox.isNotEmpty()) {
-                val parts = viewBox.split(Regex("[\\s,]+")).mapNotNull { it.toDoubleOrNull() }
-                if (parts.size >= 4) {
-                    viewWidth = parts[2]
-                    viewHeight = parts[3]
-                }
-            }
-            if (viewWidth <= 0) viewWidth = 1000.0
-            if (viewHeight <= 0) viewHeight = 1000.0
+            // Stream the document rather than building a DOM. Plans run to the
+            // 10MB upload limit and only <rect> and <text> are of interest, so
+            // holding the whole tree in memory buys nothing and costs enough to
+            // get the container OOM-killed part-way through the request.
+            val plan = parse(image.bytes)
+            val texts = plan.texts
 
             val candidates = mutableListOf<DetectionCandidate>()
-            val textNodes = svg.getElementsByTagName("text")
-            val texts = extractTexts(textNodes, viewWidth, viewHeight)
 
-            val rectNodes = svg.getElementsByTagName("rect")
-            for (i in 0 until rectNodes.length) {
-                val rect = rectNodes.item(i) as? Element ?: continue
-                val x = rect.getAttribute("x").toDoubleOrNull() ?: continue
-                val y = rect.getAttribute("y").toDoubleOrNull() ?: continue
-                val w = rect.getAttribute("width").toDoubleOrNull() ?: continue
-                val h = rect.getAttribute("height").toDoubleOrNull() ?: continue
-
-                if (w <= 0 || h <= 0) continue
-
-                val nx = (x / viewWidth).coerceIn(0.0, 1.0)
-                val ny = (y / viewHeight).coerceIn(0.0, 1.0)
-                val nw = (w / viewWidth).coerceIn(0.01, 1.0 - nx)
-                val nh = (h / viewHeight).coerceIn(0.01, 1.0 - ny)
+            // Rects arrive already normalised against the plan frame.
+            for (rect in plan.rects) {
+                val nx = rect.x
+                val ny = rect.y
+                val nw = rect.width
+                val nh = rect.height
 
                 val areaPercent = nw * nh * 100.0
                 val ratio = if (nw > 0 && nh > 0) kotlin.math.max(nw / nh, nh / nw) else 1.0
@@ -162,17 +130,119 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
 
     private data class SvgText(val text: String, val x: Double, val y: Double)
 
-    private fun extractTexts(nodes: NodeList, viewW: Double, viewH: Double): List<SvgText> {
-        val list = mutableListOf<SvgText>()
-        for (i in 0 until nodes.length) {
-            val el = nodes.item(i) as? Element ?: continue
-            val str = el.textContent?.trim() ?: continue
-            if (str.isEmpty()) continue
-            val x = el.getAttribute("x").toDoubleOrNull() ?: 0.0
-            val y = el.getAttribute("y").toDoubleOrNull() ?: 0.0
-            list.add(SvgText(str, (x / viewW).coerceIn(0.0, 1.0), (y / viewH).coerceIn(0.0, 1.0)))
+    /** A rect in normalised plan coordinates: 0..1 on both axes. */
+    private data class SvgRect(val x: Double, val y: Double, val width: Double, val height: Double)
+
+    private data class ParsedPlan(
+        val width: Double,
+        val height: Double,
+        val rects: List<SvgRect>,
+        val texts: List<SvgText>
+    )
+
+    /**
+     * One streaming pass over the document, collecting only what the heuristics
+     * read. Memory stays proportional to the number of rects and labels rather
+     * than to the size of the file.
+     *
+     * The frame comes from the root element, which arrives first, so rects can
+     * be normalised as they are encountered instead of being buffered raw.
+     */
+    private fun parse(bytes: ByteArray): ParsedPlan {
+        val factory = XMLInputFactory.newInstance().apply {
+            // Nothing in a floor plan needs external entities, and resolving
+            // them would let an uploaded file reach the filesystem or network.
+            setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false)
+            setProperty(XMLInputFactory.SUPPORT_DTD, false)
+            setProperty(XMLInputFactory.IS_COALESCING, true)
         }
-        return list
+        val rects = mutableListOf<SvgRect>()
+        val texts = mutableListOf<SvgText>()
+        var viewWidth = 0.0
+        var viewHeight = 0.0
+        var framed = false
+
+        SvgSource.reader(bytes).use { input ->
+            val xml = factory.createXMLStreamReader(input)
+            try {
+                while (xml.hasNext()) {
+                    if (xml.next() != XMLStreamConstants.START_ELEMENT) continue
+                    when (xml.localName.lowercase()) {
+                        "svg" -> if (!framed) {
+                            framed = true
+                            viewWidth = parseDim(xml.getAttributeValue(null, "width"))
+                            viewHeight = parseDim(xml.getAttributeValue(null, "height"))
+                            if (viewWidth <= 0 || viewHeight <= 0) {
+                                val box = xml.getAttributeValue(null, "viewBox")?.trim()
+                                if (!box.isNullOrEmpty()) {
+                                    val parts = box.split(WHITESPACE).mapNotNull { it.toDoubleOrNull() }
+                                    if (parts.size >= 4) {
+                                        viewWidth = parts[2]
+                                        viewHeight = parts[3]
+                                    }
+                                }
+                            }
+                            if (viewWidth <= 0) viewWidth = DEFAULT_FRAME
+                            if (viewHeight <= 0) viewHeight = DEFAULT_FRAME
+                        }
+
+                        "rect" -> if (framed && rects.size < MAX_ELEMENTS) {
+                            val x = xml.getAttributeValue(null, "x")?.toDoubleOrNull()
+                            val y = xml.getAttributeValue(null, "y")?.toDoubleOrNull()
+                            val w = xml.getAttributeValue(null, "width")?.toDoubleOrNull()
+                            val h = xml.getAttributeValue(null, "height")?.toDoubleOrNull()
+                            if (x != null && y != null && w != null && h != null && w > 0 && h > 0) {
+                                val nx = (x / viewWidth).coerceIn(0.0, 1.0)
+                                val ny = (y / viewHeight).coerceIn(0.0, 1.0)
+                                rects.add(
+                                    SvgRect(
+                                        nx, ny,
+                                        (w / viewWidth).coerceIn(0.01, 1.0 - nx),
+                                        (h / viewHeight).coerceIn(0.01, 1.0 - ny)
+                                    )
+                                )
+                            }
+                        }
+
+                        "text" -> if (framed && texts.size < MAX_ELEMENTS) {
+                            val x = xml.getAttributeValue(null, "x")?.toDoubleOrNull() ?: 0.0
+                            val y = xml.getAttributeValue(null, "y")?.toDoubleOrNull() ?: 0.0
+                            // Consume the element so nested <tspan> runs are
+                            // read as one label, the way getTextContent did.
+                            val label = textOf(xml)
+                            if (label.isNotEmpty()) {
+                                texts.add(
+                                    SvgText(
+                                        label.take(MAX_LABEL_CHARS),
+                                        (x / viewWidth).coerceIn(0.0, 1.0),
+                                        (y / viewHeight).coerceIn(0.0, 1.0)
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            } finally {
+                xml.close()
+            }
+        }
+        if (!framed) throw UnreadablePlanException("The plan file has no <svg> root element.")
+        return ParsedPlan(viewWidth, viewHeight, rects, texts)
+    }
+
+    /** Collects the character data of the element the reader is positioned on. */
+    private fun textOf(xml: XMLStreamReader): String {
+        val builder = StringBuilder()
+        var depth = 1
+        while (xml.hasNext() && depth > 0) {
+            when (xml.next()) {
+                XMLStreamConstants.START_ELEMENT -> depth++
+                XMLStreamConstants.END_ELEMENT -> depth--
+                XMLStreamConstants.CHARACTERS, XMLStreamConstants.CDATA ->
+                    if (builder.length < MAX_LABEL_CHARS) builder.append(xml.text)
+            }
+        }
+        return builder.toString().trim()
     }
 
     private fun classifyLabel(label: String): DetectedObjectType {
@@ -195,5 +265,22 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
     }
 
     private fun parseDim(v: String?): Double =
-        v?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull() ?: 0.0
+        v?.replace(NON_NUMERIC, "")?.toDoubleOrNull() ?: 0.0
+
+    private companion object {
+        /** Used when a plan states neither dimensions nor a viewBox. */
+        const val DEFAULT_FRAME = 1000.0
+
+        /**
+         * Ceiling on rects and labels kept from one plan. A drawing with more
+         * shapes than this is line-work, not rooms, and collecting all of it is
+         * how a 10MB upload turns into an OOM kill mid-request.
+         */
+        const val MAX_ELEMENTS = 20_000
+
+        const val MAX_LABEL_CHARS = 200
+
+        val WHITESPACE = Regex("[\\s,]+")
+        val NON_NUMERIC = Regex("[^0-9.]")
+    }
 }
