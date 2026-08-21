@@ -89,6 +89,6 @@ object SvgSource {
     private const val SNIFF_BYTES = 4096
     private val DECLARED_ENCODING = Regex("""<\?xml[^>]*encoding\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
     private val XML_DECLARATION = Regex("""^\s*<\?xml.*?\?>""", RegexOption.DOT_MATCHES_ALL)
-    /** Control characters XML 1.0 forbids outright, plus the replacement char. */
-    private val ILLEGAL_XML_CHARS = Regex("[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]")
+    /** Control characters XML 1.0 forbids outright; a parser rejects the document over one. */
+    private val ILLEGAL_XML_CHARS = Regex("[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]")
 }
