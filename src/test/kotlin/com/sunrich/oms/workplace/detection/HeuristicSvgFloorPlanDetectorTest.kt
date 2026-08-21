@@ -95,12 +95,14 @@ class HeuristicSvgFloorPlanDetectorTest {
         System.gc()
         val before = runtime.totalMemory() - runtime.freeMemory()
         val found = detector.detect(plan(bytes))
-        val after = runtime.totalMemory() - runtime.freeMemory()
+        // Measure what the scan holds on to, not what it allocated on the way.
+        // Transient garbage is collectible; a DOM was not, which is what put
+        // the container over its limit.
+        System.gc()
+        val retained = runtime.totalMemory() - runtime.freeMemory() - before
 
         assertThat(found.map { it.type }).contains(DetectedObjectType.CONFERENCE_ROOM)
-        // A DOM of this document ran to many times the file size. Streaming
-        // should stay well under the size of the file itself.
-        assertThat(after - before).isLessThan(bytes.size.toLong())
+        assertThat(retained).isLessThan(bytes.size.toLong())
     }
 
     @Test
@@ -113,6 +115,93 @@ class HeuristicSvgFloorPlanDetectorTest {
         val found = detector.detect(plan(body.toString().toByteArray(StandardCharsets.UTF_8)))
 
         assertThat(found.size).isLessThanOrEqualTo(20_000)
+    }
+
+    /**
+     * A CAD export is the case that matters: walls and furniture arrive as
+     * paths and polylines under transformed groups, and there is rarely a
+     * single <rect> in the file.
+     */
+    @Test
+    fun `reads rooms drawn as paths rather than rects`() {
+        val cad = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">
+              <g>
+                <path d="M 100 100 L 400 100 L 400 300 L 100 300 Z"/>
+                <text x="150" y="150">Conference Room</text>
+              </g>
+            </svg>
+        """.trimIndent()
+
+        val found = detector.detect(plan(cad.toByteArray(StandardCharsets.UTF_8)))
+
+        assertThat(found.map { it.type }).contains(DetectedObjectType.CONFERENCE_ROOM)
+    }
+
+    @Test
+    fun `reads rooms drawn as polygons and polylines`() {
+        val cad = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">
+              <polygon points="100,100 400,100 400,300 100,300"/>
+              <polyline points="600,600 900,600 900,850 600,850"/>
+            </svg>
+        """.trimIndent()
+
+        assertThat(detector.detect(plan(cad.toByteArray(StandardCharsets.UTF_8)))).hasSize(2)
+    }
+
+    @Test
+    fun `applies group transforms so shapes land where they are drawn`() {
+        // Without transform handling this room reports at the top-left corner
+        // instead of the middle of the plan.
+        val cad = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">
+              <g transform="translate(500 500) scale(2)">
+                <rect x="0" y="0" width="100" height="100"/>
+              </g>
+            </svg>
+        """.trimIndent()
+
+        val found = detector.detect(plan(cad.toByteArray(StandardCharsets.UTF_8)))
+
+        assertThat(found).hasSize(1)
+        val box = found.single().polygon
+        assertThat(box.minX).isCloseTo(0.5, org.assertj.core.data.Offset.offset(0.01))
+        assertThat(box.minY).isCloseTo(0.5, org.assertj.core.data.Offset.offset(0.01))
+        assertThat(box.width).isCloseTo(0.2, org.assertj.core.data.Offset.offset(0.01))
+    }
+
+    @Test
+    fun `folds a viewBox origin into the frame`() {
+        val cad = """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="1000 1000 1000 1000">
+              <rect x="1100" y="1100" width="300" height="200"/>
+            </svg>
+        """.trimIndent()
+
+        val found = detector.detect(plan(cad.toByteArray(StandardCharsets.UTF_8)))
+
+        assertThat(found).hasSize(1)
+        assertThat(found.single().polygon.minX)
+            .isCloseTo(0.1, org.assertj.core.data.Offset.offset(0.01))
+    }
+
+    @Test
+    fun `takes the largest subpath when an exporter merges a layer into one path`() {
+        // One <path> holding a room outline plus a scattering of furniture
+        // line-work must not report the bounding box of the whole floor.
+        val cad = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">
+              <path d="M 10 10 L 20 10 L 20 20 L 10 20 Z M 100 100 L 400 100 L 400 300 L 100 300 Z M 900 900 L 910 900 L 910 910 Z"/>
+            </svg>
+        """.trimIndent()
+
+        val found = detector.detect(plan(cad.toByteArray(StandardCharsets.UTF_8)))
+
+        assertThat(found).hasSize(1)
+        val box = found.single().polygon
+        assertThat(box.minX).isCloseTo(0.1, org.assertj.core.data.Offset.offset(0.01))
+        assertThat(box.width).isCloseTo(0.3, org.assertj.core.data.Offset.offset(0.01))
     }
 
     @Test
