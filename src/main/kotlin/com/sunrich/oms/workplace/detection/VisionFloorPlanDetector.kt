@@ -31,7 +31,14 @@ data class DetectionProperties(
      * maps and other annotated plans; turn off for a clean CAD export where the
      * drawing itself is coloured.
      */
-    var preprocess: Boolean = true
+    var preprocess: Boolean = true,
+    /**
+     * Output token budget. Kept at a value every provider accepts: Gemini Flash
+     * and most free tiers cap output around 8k, and asking for more is rejected
+     * outright rather than clamped — which surfaces as "no objects found".
+     * Raise it on a provider that allows more if a dense plan gets truncated.
+     */
+    var maxTokens: Int = 8000
 )
 
 /**
@@ -105,7 +112,7 @@ class VisionFloorPlanDetector(
 
     private fun anthropicBody(encoded: String, mediaType: String) = mapOf(
         "model" to props.model,
-        "max_tokens" to MAX_TOKENS,
+        "max_tokens" to props.maxTokens,
         "messages" to listOf(
             mapOf(
                 "role" to "user",
@@ -122,7 +129,7 @@ class VisionFloorPlanDetector(
 
     private fun openAiBody(encoded: String, mediaType: String) = mapOf(
         "model" to props.model,
-        "max_tokens" to MAX_TOKENS,
+        "max_tokens" to props.maxTokens,
         "messages" to listOf(
             mapOf(
                 "role" to "user",
@@ -142,15 +149,31 @@ class VisionFloorPlanDetector(
      * that we extract the outermost array rather than trusting the whole body.
      */
     private fun parse(content: String): List<DetectionCandidate> {
-        val json = content.substringAfter("```json", content).substringBefore("```").trim()
-        val start = json.indexOf('[')
-        val end = json.lastIndexOf(']')
+        // Scan the raw body for the outermost array rather than stripping code
+        // fences first. Fencing styles vary by model — ```json, a bare ```, or
+        // none at all — and fence-stripping that assumes one style silently
+        // truncates the others down to prose, yielding "no objects found".
+        val start = content.indexOf('[')
+        val end = content.lastIndexOf(']')
         if (start < 0 || end <= start) {
-            log.warn("Vision model response contained no JSON array")
+            log.warn(
+                "Vision model returned no JSON array. First {} chars of the response: {}",
+                RESPONSE_LOG_CHARS, content.take(RESPONSE_LOG_CHARS)
+            )
             return emptyList()
         }
-        val array = mapper.readTree(json.substring(start, end + 1))
-        return array.mapNotNull(::candidate)
+        return try {
+            mapper.readTree(content.substring(start, end + 1)).mapNotNull(::candidate)
+        } catch (ex: Exception) {
+            // A truncated response leaves unbalanced JSON. Say so plainly: the
+            // usual fix is a larger token budget, not a different plan.
+            log.warn(
+                "Vision model returned malformed JSON ({}). It may have been truncated; " +
+                    "consider raising oms.workplace.detection.max-tokens (currently {}).",
+                ex.message, props.maxTokens
+            )
+            emptyList()
+        }
     }
 
     private fun candidate(node: JsonNode): DetectionCandidate? = try {
@@ -174,7 +197,7 @@ class VisionFloorPlanDetector(
 
     private companion object {
         const val ANTHROPIC_VERSION = "2023-06-01"
-        const val MAX_TOKENS = 32000
+        const val RESPONSE_LOG_CHARS = 400
         val SUPPORTED_IMAGE_TYPES = setOf("image/png", "image/jpeg")
 
         val PROMPT = """

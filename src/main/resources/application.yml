@@ -84,11 +84,19 @@ oms:
       # Floor plan recognition. 'none' disables it entirely; 'vision' sends the
       # plan image to the configured model. No key means no detection — the
       # module reports nothing found rather than inventing desks.
+      #
+      # Any OpenAI-compatible vision endpoint works, including free tiers:
+      #   Gemini     base-url https://generativelanguage.googleapis.com/v1beta/openai
+      #              model gemini-2.0-flash          api-style openai
+      #   OpenRouter base-url https://openrouter.ai/api/v1
+      #              model google/gemini-2.0-flash-exp:free   api-style openai
       provider: ${WORKPLACE_DETECTION_PROVIDER:none}
       api-key: ${WORKPLACE_DETECTION_API_KEY:}
       base-url: ${WORKPLACE_DETECTION_BASE_URL:https://api.anthropic.com/v1}
       model: ${WORKPLACE_DETECTION_MODEL:claude-sonnet-5}
       api-style: ${WORKPLACE_DETECTION_API_STYLE:anthropic}
+      # Output budget. 8k suits free tiers, which reject larger asks outright.
+      max-tokens: ${WORKPLACE_DETECTION_MAX_TOKENS:8000}
       max-objects: ${WORKPLACE_DETECTION_MAX_OBJECTS:400}
       # Strip evacuation-map decoration (background, arrows, icons, legend)
       # before detection. Disable for clean CAD exports drawn in colour.
