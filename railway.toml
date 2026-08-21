@@ -4,6 +4,11 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 healthcheckPath = "/api/actuator/health"
-healthcheckTimeout = 100
+# The app needs ~25s to start (Hibernate schema introspection plus the startup
+# seeders), so a 100s budget is only about three restart attempts. One slow
+# container start then exhausts it and the deployment is marked failed even
+# though the application is healthy. 300s leaves room for a bad start without
+# hiding a genuinely broken build.
+healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
