@@ -312,6 +312,42 @@ class HeuristicSvgFloorPlanDetectorTest {
      * Refusing is the useful answer — a floor covered in wrong objects has to
      * be cleared by hand before it can be done properly.
      */
+    /**
+     * Guards the allocation rate of a scan, which has taken the container down
+     * twice. Path data is where the volume is — a traced plan carries hundreds
+     * of thousands of numbers — and the two costs that did the damage were a
+     * Regex tokeniser (a MatchResult and a String per token) and
+     * `toDoubleOrNull`, which screens every call against another Regex.
+     *
+     * The real 2.7MB plan allocated 297MB before this and 66MB after. The
+     * bound is loose enough not to be brittle and tight enough to catch a
+     * return to per-token allocation.
+     */
+    @Test
+    fun `scans a curve-heavy plan without allocating orders of magnitude more than it reads`() {
+        val body = StringBuilder()
+        body.append("""<svg xmlns="http://www.w3.org/2000/svg" width="2752" height="1566">""")
+        while (body.length < 2 * 1024 * 1024) {
+            body.append("""<path d="M100 100 """)
+            repeat(20) { body.append("""C${it * 1.5} 100.25 ${it * 2.5} 140.5 ${it * 3.5} 180.75 """) }
+            body.append("""Z" fill="#FCFCFC"/>""")
+        }
+        body.append("</svg>")
+        val bytes = body.toString().toByteArray(StandardCharsets.UTF_8)
+
+        val threads = java.lang.management.ManagementFactory.getThreadMXBean()
+        // The allocation counter is a HotSpot extension; skip where absent.
+        org.junit.jupiter.api.Assumptions.assumeTrue(threads is com.sun.management.ThreadMXBean)
+        val counter = threads as com.sun.management.ThreadMXBean
+        val id = Thread.currentThread().threadId()
+
+        val before = counter.getThreadAllocatedBytes(id)
+        runCatching { detector.detect(plan(bytes)) }
+        val allocated = counter.getThreadAllocatedBytes(id) - before
+
+        assertThat(allocated).isLessThan(bytes.size.toLong() * 40)
+    }
+
     @Test
     fun `refuses an auto-traced bitmap instead of inventing objects from it`() {
         val body = StringBuilder("""<svg xmlns="http://www.w3.org/2000/svg" width="2752" height="1566">""")

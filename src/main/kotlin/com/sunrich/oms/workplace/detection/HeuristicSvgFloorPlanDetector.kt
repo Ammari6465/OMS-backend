@@ -397,44 +397,98 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
             current = mutableListOf()
         }
 
-        val tokens = PATH_TOKEN.findAll(d).map { it.value }.iterator()
-        val pending = ArrayDeque<Double>()
-        while (tokens.hasNext()) {
-            val token = tokens.next()
-            val letter = token[0]
-            if (letter.isLetter()) {
-                if (letter == 'Z' || letter == 'z') close()
-                when (letter.uppercaseChar()) {
+        // Scanned by hand rather than with a Regex. A traced plan carries tens
+        // of thousands of curve commands, and matching them allocates a
+        // MatchResult and a String per token — 297MB of churn for one 2.7MB
+        // file, enough to get the container OOM-killed mid-request. Walking the
+        // characters keeps a scan flat.
+        val args = DoubleArray(MAX_PATH_ARGS)
+        var argCount = 0
+        var i = 0
+        while (i < d.length) {
+            val c = d[i]
+            if (c == ' ' || c == ',' || c == '\t' || c == '\n' || c == '\r') {
+                i++
+                continue
+            }
+            if (c.isLetter()) {
+                if (c == 'Z' || c == 'z') close()
+                when (c.uppercaseChar()) {
                     'L', 'H', 'V' -> strokes.straight++
                     'C', 'S', 'Q', 'T', 'A' -> strokes.curved++
                 }
-                command = letter
-                pending.clear()
+                command = c
+                argCount = 0
+                i++
                 continue
             }
-            val value = token.toDoubleOrNull() ?: continue
-            pending.addLast(value)
+
+            val start = i
+            if (c == '+' || c == '-') i++
+            var seenDot = false
+            while (i < d.length) {
+                val ch = d[i]
+                // One decimal point per number: "1.5.5" is two numbers, which
+                // exporters do write to save bytes.
+                if (ch.isDigit()) i++ else if (ch == '.' && !seenDot) { seenDot = true; i++ } else break
+            }
+            if (i < d.length && (d[i] == 'e' || d[i] == 'E')) {
+                val exponent = i
+                i++
+                if (i < d.length && (d[i] == '+' || d[i] == '-')) i++
+                if (i < d.length && d[i].isDigit()) while (i < d.length && d[i].isDigit()) i++ else i = exponent
+            }
+            if (i == start) {
+                i++
+                continue
+            }
+            val value = parseNumber(d, start, i) ?: continue
+            if (argCount < args.size) args[argCount++] = value
+
+            val arity = arityOf(command)
+            if (arity == 0 || argCount < arity) continue
             val relative = command.isLowerCase()
+            // Curves contribute only their endpoint, which is the last pair.
             when (command.uppercaseChar()) {
-                'M', 'L', 'T' -> if (pending.size == 2) {
+                'M', 'L', 'T', 'C', 'S', 'Q', 'A' -> {
                     if (command == 'M' || command == 'm') close()
-                    x = if (relative) x + pending.removeFirst() else pending.removeFirst()
-                    y = if (relative) y + pending.removeFirst() else pending.removeFirst()
+                    x = if (relative) x + args[arity - 2] else args[arity - 2]
+                    y = if (relative) y + args[arity - 1] else args[arity - 1]
                     current.add(Point(x, y))
                     // Extra coordinate pairs after an M are implicit L commands.
                     if (command == 'M') command = 'L' else if (command == 'm') command = 'l'
                 }
-                'H' -> { x = if (relative) x + pending.removeFirst() else pending.removeFirst(); current.add(Point(x, y)) }
-                'V' -> { y = if (relative) y + pending.removeFirst() else pending.removeFirst(); current.add(Point(x, y)) }
-                // Curves: keep only the endpoint, which is the final pair.
-                'C' -> if (pending.size == 6) { repeat(4) { pending.removeFirst() }; x = if (relative) x + pending.removeFirst() else pending.removeFirst(); y = if (relative) y + pending.removeFirst() else pending.removeFirst(); current.add(Point(x, y)) }
-                'S', 'Q' -> if (pending.size == 4) { repeat(2) { pending.removeFirst() }; x = if (relative) x + pending.removeFirst() else pending.removeFirst(); y = if (relative) y + pending.removeFirst() else pending.removeFirst(); current.add(Point(x, y)) }
-                'A' -> if (pending.size == 7) { repeat(5) { pending.removeFirst() }; x = if (relative) x + pending.removeFirst() else pending.removeFirst(); y = if (relative) y + pending.removeFirst() else pending.removeFirst(); current.add(Point(x, y)) }
-                else -> pending.clear()
+                'H' -> { x = if (relative) x + args[0] else args[0]; current.add(Point(x, y)) }
+                'V' -> { y = if (relative) y + args[0] else args[0]; current.add(Point(x, y)) }
             }
+            argCount = 0
         }
         close()
         return best
+    }
+
+    /**
+     * Parses one number out of a path's `d` attribute.
+     *
+     * Deliberately not `toDoubleOrNull`: that screens every call against a
+     * Regex before parsing, which at a few hundred thousand numbers per plan
+     * costs more than the rest of the scan put together. The scanner above has
+     * already established the character shape, so parse and catch instead.
+     */
+    private fun parseNumber(text: String, start: Int, end: Int): Double? = try {
+        java.lang.Double.parseDouble(text.substring(start, end))
+    } catch (_: NumberFormatException) {
+        null
+    }
+
+    /** How many numbers each path command consumes before it can be applied. */
+    private fun arityOf(command: Char) = when (command.uppercaseChar()) {
+        'H', 'V' -> 1
+        'M', 'L', 'T' -> 2
+        'S', 'Q' -> 4
+        'C' -> 6
+        'A' -> 7
+        else -> 0
     }
 
     /** Transforms a shape into the plan frame and reduces it to a 0..1 box. */
@@ -606,10 +660,11 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
         /** A `d` attribute longer than this is a whole layer, not a room. */
         const val MAX_PATH_CHARS = 200_000
 
+        /** Widest path command is the elliptical arc, at seven numbers. */
+        const val MAX_PATH_ARGS = 7
+
         val WHITESPACE = Regex("[\\s,]+")
         val NON_NUMERIC = Regex("[^0-9.]")
         val TRANSFORM = Regex("""(\w+)\s*\(([^)]*)\)""")
-        /** One path token: a command letter, or a number in any SVG spelling. */
-        val PATH_TOKEN = Regex("""[A-Za-z]|[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?""")
     }
 }
