@@ -82,12 +82,13 @@ class HeuristicSvgFloorPlanDetectorTest {
     fun `scans a plan at the upload size limit without exhausting memory`() {
         val body = StringBuilder(11 * 1024 * 1024)
         body.append("""<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">""")
+        body.append("<rect x=\"100\" y=\"100\" width=\"300\" height=\"200\"/>")
         body.append("<text x=\"150\" y=\"150\">Conference Room</text>")
         // Line-work: the bulk of a real CAD export, and none of it is a room.
         while (body.length < 10 * 1024 * 1024) {
             body.append("<path d=\"M0,0 L10,10 L20,20 L30,30 L40,40 L50,50 L60,60 Z\"/>")
         }
-        body.append("<rect x=\"100\" y=\"100\" width=\"300\" height=\"200\"/></svg>")
+        body.append("</svg>")
         val bytes = body.toString().toByteArray(StandardCharsets.UTF_8)
         assertThat(bytes.size).isGreaterThan(10 * 1024 * 1024)
 
@@ -202,6 +203,140 @@ class HeuristicSvgFloorPlanDetectorTest {
         val box = found.single().polygon
         assertThat(box.minX).isCloseTo(0.1, org.assertj.core.data.Offset.offset(0.01))
         assertThat(box.width).isCloseTo(0.3, org.assertj.core.data.Offset.offset(0.01))
+    }
+
+    /**
+     * The clutter case. A CAD plan draws the same region several times — a fill
+     * behind its stroke, an outline repeated across layers — and emitting each
+     * one buries the floor under stacked boxes.
+     */
+    @Test
+    fun `collapses a region drawn more than once into a single object`() {
+        val duplicated = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">
+              <rect x="100" y="100" width="300" height="200"/>
+              <rect x="102" y="101" width="298" height="199"/>
+              <path d="M 100 100 L 400 100 L 400 300 L 100 300 Z"/>
+            </svg>
+        """.trimIndent()
+
+        assertThat(detector.detect(plan(duplicated.toByteArray(StandardCharsets.UTF_8)))).hasSize(1)
+    }
+
+    @Test
+    fun `keeps a desk that sits inside a room, because nesting is real`() {
+        val nested = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">
+              <rect x="100" y="100" width="300" height="200"/>
+              <rect x="150" y="150" width="90" height="60"/>
+            </svg>
+        """.trimIndent()
+
+        val found = detector.detect(plan(nested.toByteArray(StandardCharsets.UTF_8)))
+
+        assertThat(found.map { it.type })
+            .containsExactlyInAnyOrder(DetectedObjectType.CABIN, DetectedObjectType.DESK)
+    }
+
+    @Test
+    fun `ignores the sheet border and the hairlines, keeping what is between`() {
+        val sheet = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">
+              <rect x="0" y="0" width="1000" height="1000"/>
+              <rect x="10" y="10" width="6" height="6"/>
+              <rect x="400" y="400" width="90" height="60"/>
+            </svg>
+        """.trimIndent()
+
+        val found = detector.detect(plan(sheet.toByteArray(StandardCharsets.UTF_8)))
+
+        // The border covers everything and the hairline covers nothing; only
+        // the desk-sized rectangle is a real object.
+        assertThat(found.map { it.type }).containsExactly(DetectedObjectType.DESK)
+    }
+
+    /**
+     * A desk tag printed on a drawing border must not turn the border into a
+     * desk. Size decides the type; the label only refines it.
+     */
+    @Test
+    fun `does not let a desk tag reclassify the shape that encloses the page`() {
+        val tagged = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">
+              <rect x="0" y="0" width="980" height="980"/>
+              <text x="20" y="20">A01</text>
+            </svg>
+        """.trimIndent()
+
+        assertThat(detector.detect(plan(tagged.toByteArray(StandardCharsets.UTF_8)))).isEmpty()
+    }
+
+    @Test
+    fun `a label names the smallest shape enclosing it, not the outermost`() {
+        val nested = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">
+              <rect x="100" y="100" width="600" height="400"/>
+              <rect x="150" y="150" width="250" height="200"/>
+              <text x="200" y="200">Conference Room</text>
+            </svg>
+        """.trimIndent()
+
+        val found = detector.detect(plan(nested.toByteArray(StandardCharsets.UTF_8)))
+        val conference = found.single { it.type == DetectedObjectType.CONFERENCE_ROOM }
+
+        // The inner room carries the label; the outer block stays a zone.
+        assertThat(conference.polygon.width).isCloseTo(0.25, org.assertj.core.data.Offset.offset(0.01))
+    }
+
+    @Test
+    fun `drops furniture symbols that do not match the size the desks repeat at`() {
+        val body = StringBuilder("""<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">""")
+        // Twelve desks on a regular grid, all the same size.
+        repeat(12) { body.append("""<rect x="${100 + it * 60}" y="200" width="50" height="40"/>""") }
+        // Inside the desk size band, but three times the area the desks repeat
+        // at — a furniture symbol, not another workstation.
+        body.append("""<rect x="100" y="600" width="90" height="80"/>""")
+        body.append("</svg>")
+
+        val found = detector.detect(plan(body.toString().toByteArray(StandardCharsets.UTF_8)))
+
+        assertThat(found).hasSize(12)
+    }
+
+    /**
+     * Modelled on a plan a user actually uploaded: an image auto-traced into
+     * SVG. 2857 filled curves, not one straight segment, no text. Nothing in it
+     * maps to a room or a desk, and the geometry heuristics happily produced
+     * 133 confident boxes of nonsense over the top of the plan.
+     *
+     * Refusing is the useful answer — a floor covered in wrong objects has to
+     * be cleared by hand before it can be done properly.
+     */
+    @Test
+    fun `refuses an auto-traced bitmap instead of inventing objects from it`() {
+        val body = StringBuilder("""<svg xmlns="http://www.w3.org/2000/svg" width="2752" height="1566">""")
+        repeat(300) { i ->
+            val x = 100 + i * 3
+            // All curves, no lines: the shape of a tracer's output.
+            body.append("""<path d="M$x 100 C${x + 40} 100 ${x + 60} 140 ${x + 60} 180 C${x + 60} 220 ${x + 20} 240 $x 240 Z" fill="#FCFCFC"/>""")
+        }
+        body.append("</svg>")
+
+        assertThatThrownBy { detector.detect(plan(body.toString().toByteArray(StandardCharsets.UTF_8))) }
+            .isInstanceOf(UnreadablePlanException::class.java)
+            .hasMessageContaining("auto-traced")
+            .hasMessageContaining("PNG or JPEG")
+    }
+
+    @Test
+    fun `still reads a curved but properly drafted plan that keeps its labels`() {
+        // Curves alone are not the signal — a real drawing has straight walls
+        // and live text, and must not be caught by the tracer guard.
+        val body = StringBuilder("""<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">""")
+        repeat(200) { body.append("""<path d="M100 100 C150 100 200 140 200 180 L200 300 L100 300 Z"/>""") }
+        body.append("""<text x="150" y="150">Conference Room</text></svg>""")
+
+        assertThat(detector.detect(plan(body.toString().toByteArray(StandardCharsets.UTF_8)))).isNotEmpty
     }
 
     @Test

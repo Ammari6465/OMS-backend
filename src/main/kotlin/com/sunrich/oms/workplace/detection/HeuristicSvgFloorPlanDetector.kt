@@ -32,89 +32,38 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
             // holding the whole tree in memory buys nothing and costs enough to
             // get the container OOM-killed part-way through the request.
             val plan = parse(image.bytes)
-            val texts = plan.texts
+            rejectTracedBitmap(plan)
+            val shapes = plan.rects
+            val labels = labelOwners(shapes, plan.texts)
 
-            val candidates = mutableListOf<DetectionCandidate>()
-
-            // Rects arrive already normalised against the plan frame.
-            for (rect in plan.rects) {
-                val nx = rect.x
-                val ny = rect.y
-                val nw = rect.width
-                val nh = rect.height
-
-                val areaPercent = nw * nh * 100.0
-                val ratio = if (nw > 0 && nh > 0) kotlin.math.max(nw / nh, nh / nw) else 1.0
-
-                // Match with text label inside or near bounds
-                val matchedText = texts.find { t ->
-                    t.x >= nx - 0.02 && t.x <= nx + nw + 0.02 &&
-                    t.y >= ny - 0.02 && t.y <= ny + nh + 0.02
-                }
-
-                val type = when {
-                    matchedText != null -> classifyLabel(matchedText.text)
-                    areaPercent in 0.02..2.5 && ratio in 0.8..3.5 -> DetectedObjectType.DESK
-                    areaPercent in 2.5..12.0 -> DetectedObjectType.CABIN
-                    areaPercent > 12.0 -> DetectedObjectType.ZONE
-                    else -> null
-                } ?: continue
-
-                val polygon = Polygon.ofClamped(
-                    listOf(
-                        Point(nx, ny),
-                        Point(nx + nw, ny),
-                        Point(nx + nw, ny + nh),
-                        Point(nx, ny + nh)
-                    )
-                )
-
-                candidates.add(
-                    DetectionCandidate(
-                        type = type,
-                        polygon = polygon,
-                        name = matchedText?.text,
-                        ocrText = matchedText?.text,
-                        rotation = if (nw < nh) 90 else 0,
-                        confidence = if (matchedText != null) 0.9 else 0.7
-                    )
+            // Classify by size first. A label refines the type; it never sets it,
+            // because a sheet-sized rectangle containing the tag "A01" is a
+            // drawing border, not a desk.
+            val classified = shapes.mapIndexedNotNull { index, s ->
+                val label = labels[index]
+                val type = classify(s.width * s.height * 100.0, ratioOf(s), label?.text) ?: return@mapIndexedNotNull null
+                DetectionCandidate(
+                    type = type,
+                    polygon = Polygon.rectangle(s.x, s.y, s.width, s.height),
+                    name = label?.text,
+                    ocrText = label?.text,
+                    rotation = if (s.width < s.height) 90 else 0,
+                    confidence = if (label != null) 0.9 else 0.7
                 )
             }
 
-            // Also emit candidates from explicit text labels if not captured by rects
-            for (t in texts) {
-                val labelType = classifyLabel(t.text)
-                if (labelType != DetectedObjectType.UNKNOWN) {
-                    val alreadyCovered = candidates.any { c ->
-                        val center = c.polygon.center
-                        kotlin.math.abs(center.x - t.x) < 0.05 && kotlin.math.abs(center.y - t.y) < 0.05
-                    }
-                    if (!alreadyCovered) {
-                        val w = 0.12
-                        val h = 0.08
-                        val nx = (t.x - w / 2).coerceIn(0.0, 1.0 - w)
-                        val ny = (t.y - h / 2).coerceIn(0.0, 1.0 - h)
-                        candidates.add(
-                            DetectionCandidate(
-                                type = labelType,
-                                polygon = Polygon.ofClamped(
-                                    listOf(
-                                        Point(nx, ny),
-                                        Point(nx + w, ny),
-                                        Point(nx + w, ny + h),
-                                        Point(nx, ny + h)
-                                    )
-                                ),
-                                name = t.text,
-                                ocrText = t.text,
-                                rotation = 0,
-                                confidence = 0.85
-                            )
-                        )
-                    }
-                }
-            }
-            candidates.distinctBy { Pair(it.type, String.format("%.2f,%.2f", it.polygon.center.x, it.polygon.center.y)) }
+            val candidates = suppressOverlaps(consistentDesks(classified)).take(MAX_CANDIDATES)
+            log.info(
+                "Classified {} shapes into {} candidates ({} desks, {} rooms)",
+                shapes.size, candidates.size,
+                candidates.count { it.type == DetectedObjectType.DESK },
+                candidates.count { it.type != DetectedObjectType.DESK }
+            )
+            candidates
+        } catch (ex: UnreadablePlanException) {
+            // Already carries a diagnosis aimed at the user. Wrapping it in the
+            // generic parse message below would bury the useful half.
+            throw ex
         } catch (ex: Exception) {
             // The file announced itself as SVG and then would not parse. That is
             // a broken plan, not an empty one, and the caller has to be able to
@@ -128,6 +77,136 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
         }
     }
 
+    /**
+     * Refuses a plan that is a picture wearing an SVG extension.
+     *
+     * Auto-tracers turn a bitmap into thousands of filled curves, one per blob
+     * of quantised colour, with every printed label traced into outlines rather
+     * than left as text. Nothing in it corresponds to a room or a desk, so the
+     * geometry here can only produce confident nonsense — which is worse than
+     * an honest refusal, because a floor covered in wrong boxes has to be
+     * cleaned up by hand before it can be redone properly.
+     *
+     * The signature is specific enough not to catch a real drawing: an
+     * architectural plan is built from straight segments and keeps its labels
+     * as text. All curves, no lines, and no text at all is a trace.
+     */
+    private fun rejectTracedBitmap(plan: ParsedPlan) {
+        val traced = plan.texts.isEmpty() &&
+            plan.strokes.straight == 0 &&
+            plan.strokes.curved >= TRACED_MIN_CURVES &&
+            plan.rects.size >= TRACED_MIN_SHAPES
+        if (!traced) return
+        log.info(
+            "Plan looks auto-traced: {} shapes, {} curves, no straight segments, no text",
+            plan.rects.size, plan.strokes.curved
+        )
+        throw UnreadablePlanException(
+            "This plan is a bitmap that has been auto-traced into ${plan.rects.size} curve outlines — " +
+                "it has no text and no straight walls, so there is nothing here to recognise as rooms or desks. " +
+                "Upload the original PNG or JPEG of this plan and enable vision detection, " +
+                "or upload a CAD-exported SVG."
+        )
+    }
+
+    /**
+     * Assigns each label to the smallest shape that encloses it.
+     *
+     * Innermost wins, because a plan nests: a desk tag sits inside a desk,
+     * inside a room, inside the sheet border. Matching the first enclosing
+     * shape instead lets a drawing border adopt the first tag on the page and
+     * be classified from it.
+     */
+    private fun labelOwners(shapes: List<SvgRect>, texts: List<SvgText>): Map<Int, SvgText> {
+        val owners = HashMap<Int, SvgText>()
+        for (t in texts) {
+            var best = -1
+            var bestArea = Double.MAX_VALUE
+            shapes.forEachIndexed { i, s ->
+                if (t.x >= s.x && t.x <= s.x + s.width && t.y >= s.y && t.y <= s.y + s.height) {
+                    val area = s.width * s.height
+                    if (area < bestArea) {
+                        bestArea = area
+                        best = i
+                    }
+                }
+            }
+            if (best >= 0) owners.putIfAbsent(best, t)
+        }
+        return owners
+    }
+
+    private fun ratioOf(s: SvgRect) =
+        if (s.width > 0 && s.height > 0) kotlin.math.max(s.width / s.height, s.height / s.width) else 1.0
+
+    /**
+     * Types a shape from how much of the plan it covers, letting a label refine
+     * the result rather than decide it.
+     *
+     * The bands exist to reject, not just to name. Below [MIN_AREA] is
+     * line-work — chair glyphs, door swings, hatching — and above
+     * [ZONE_MAX_AREA] is the sheet border or a background fill. Emitting those
+     * buries the real objects under overlapping boxes.
+     */
+    private fun classify(areaPercent: Double, ratio: Double, label: String?): DetectedObjectType? {
+        val labelled = label?.let(::classifyLabel)?.takeIf { it != DetectedObjectType.UNKNOWN }
+        return when {
+            areaPercent < MIN_AREA -> null
+            areaPercent <= DESK_MAX_AREA ->
+                if (ratio <= DESK_MAX_RATIO) DetectedObjectType.DESK else null
+            areaPercent <= ROOM_MAX_AREA -> labelled?.takeIf { it in ROOM_TYPES } ?: DetectedObjectType.CABIN
+            areaPercent <= ZONE_MAX_AREA -> labelled?.takeIf { it in ROOM_TYPES } ?: DetectedObjectType.ZONE
+            else -> null
+        }
+    }
+
+    /**
+     * Keeps only desks that look like the other desks.
+     *
+     * Office desks repeat at close to one size; the stray furniture symbols
+     * that survive the area band do not. Measuring against the median rather
+     * than a fixed size lets this work on any plan scale.
+     */
+    private fun consistentDesks(candidates: List<DetectionCandidate>): List<DetectionCandidate> {
+        val desks = candidates.filter { it.type == DetectedObjectType.DESK }
+        if (desks.size < MIN_DESKS_FOR_MODE) return candidates
+        val median = desks.map { it.polygon.area }.sorted()[desks.size / 2]
+        if (median <= 0) return candidates
+        return candidates.filter {
+            it.type != DetectedObjectType.DESK ||
+                it.polygon.area in (median / DESK_SIZE_SPREAD)..(median * DESK_SIZE_SPREAD)
+        }
+    }
+
+    /**
+     * Drops shapes of the same type that describe the same region twice —
+     * double-drawn outlines, a fill behind its own stroke, a room repeated on
+     * two layers. Nesting across types survives, because a desk genuinely does
+     * sit inside a room which sits inside a zone.
+     *
+     * Smallest first, so the specific shape wins over the block containing it.
+     */
+    private fun suppressOverlaps(candidates: List<DetectionCandidate>): List<DetectionCandidate> {
+        val ordered = candidates.sortedWith(compareBy({ it.polygon.area }, { -it.confidence }))
+        val kept = mutableListOf<DetectionCandidate>()
+        for (c in ordered) {
+            // Comparing every shape against every kept one is quadratic, so the
+            // ceiling that bounds the output bounds the work as well.
+            if (kept.size >= MAX_CANDIDATES) break
+            if (kept.none { it.type == c.type && covers(it.polygon, c.polygon) }) kept.add(c)
+        }
+        return kept
+    }
+
+    /** Overlap as a fraction of the smaller shape, so containment counts too. */
+    private fun covers(a: Polygon, b: Polygon): Boolean {
+        val w = kotlin.math.min(a.maxX, b.maxX) - kotlin.math.max(a.minX, b.minX)
+        val h = kotlin.math.min(a.maxY, b.maxY) - kotlin.math.max(a.minY, b.minY)
+        if (w <= 0 || h <= 0) return false
+        val smaller = kotlin.math.min(a.area, b.area)
+        return smaller > 0 && (w * h) / smaller > OVERLAP_LIMIT
+    }
+
     private data class SvgText(val text: String, val x: Double, val y: Double)
 
     /** A rect in normalised plan coordinates: 0..1 on both axes. */
@@ -137,8 +216,12 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
         val width: Double,
         val height: Double,
         val rects: List<SvgRect>,
-        val texts: List<SvgText>
+        val texts: List<SvgText>,
+        val strokes: PathStats
     )
+
+    /** Tally of what the path data is made of, used to spot a traced bitmap. */
+    private data class PathStats(var straight: Int = 0, var curved: Int = 0)
 
     /**
      * One streaming pass over the document, collecting only what the heuristics
@@ -159,6 +242,7 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
         val rects = mutableListOf<SvgRect>()
         val texts = mutableListOf<SvgText>()
         val census = HashMap<String, Int>()
+        val strokes = PathStats()
         // Cumulative transform in effect at the current depth. CAD exporters
         // nest the whole drawing under transformed groups, so coordinates read
         // off an element mean nothing until this is applied.
@@ -228,7 +312,7 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
                         }
 
                         else -> if (framed && rects.size < MAX_ELEMENTS) {
-                            shapeOf(name, xml)?.let { points ->
+                            shapeOf(name, xml, strokes)?.let { points ->
                                 normalise(points, here, viewWidth, viewHeight)?.let(rects::add)
                             }
                         }
@@ -247,7 +331,7 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
             viewWidth.toInt(), viewHeight.toInt(), rects.size, texts.size,
             census.entries.sortedByDescending { it.value }.take(CENSUS_KINDS).joinToString { "${it.key}=${it.value}" }
         )
-        return ParsedPlan(viewWidth, viewHeight, rects, texts)
+        return ParsedPlan(viewWidth, viewHeight, rects, texts, strokes)
     }
 
     /**
@@ -259,7 +343,7 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
      * Curves contribute their endpoints only. That is enough for a bounding
      * box, which is all the classification below uses.
      */
-    private fun shapeOf(name: String, xml: XMLStreamReader): List<Point>? = when (name) {
+    private fun shapeOf(name: String, xml: XMLStreamReader, strokes: PathStats): List<Point>? = when (name) {
         "rect" -> {
             val x = xml.getAttributeValue(null, "x")?.toDoubleOrNull() ?: 0.0
             val y = xml.getAttributeValue(null, "y")?.toDoubleOrNull() ?: 0.0
@@ -271,7 +355,7 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
 
         "polygon", "polyline" -> points(xml.getAttributeValue(null, "points"))
 
-        "path" -> largestSubpath(xml.getAttributeValue(null, "d"))
+        "path" -> largestSubpath(xml.getAttributeValue(null, "d"), strokes)
 
         else -> null
     }
@@ -292,7 +376,7 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
      * describe the whole floor rather than a room, and emitting every subpath
      * would flood the map with line-work, so the biggest one wins.
      */
-    private fun largestSubpath(d: String?): List<Point>? {
+    private fun largestSubpath(d: String?, strokes: PathStats): List<Point>? {
         if (d.isNullOrBlank() || d.length > MAX_PATH_CHARS) return null
         var best: List<Point>? = null
         var bestArea = 0.0
@@ -320,6 +404,10 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
             val letter = token[0]
             if (letter.isLetter()) {
                 if (letter == 'Z' || letter == 'z') close()
+                when (letter.uppercaseChar()) {
+                    'L', 'H', 'V' -> strokes.straight++
+                    'C', 'S', 'Q', 'T', 'A' -> strokes.curved++
+                }
                 command = letter
                 pending.clear()
                 continue
@@ -482,6 +570,38 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
 
         /** Element kinds named in the diagnostic census line. */
         const val CENSUS_KINDS = 8
+
+        // ---- classification bands, as a percentage of the plan's surface ----
+        /** Below this a shape is line-work: chair glyphs, door swings, hatching. */
+        const val MIN_AREA = 0.05
+        const val DESK_MAX_AREA = 1.2
+        const val DESK_MAX_RATIO = 3.0
+        const val ROOM_MAX_AREA = 12.0
+        /** Above this is the sheet border or a background fill, not a region. */
+        const val ZONE_MAX_AREA = 60.0
+
+        /** Desks are only measured against each other once there are enough. */
+        const val MIN_DESKS_FOR_MODE = 6
+        /** How far from the median desk area a desk may still be. */
+        const val DESK_SIZE_SPREAD = 2.5
+
+        /** Overlap of the smaller shape above which two are the same region. */
+        const val OVERLAP_LIMIT = 0.5
+
+        /** Ceiling on what one scan puts on the map. */
+        const val MAX_CANDIDATES = 1_500
+
+        // ---- traced-bitmap signature ----
+        const val TRACED_MIN_CURVES = 500
+        const val TRACED_MIN_SHAPES = 100
+
+        /** Types a printed label may assign; a desk tag never renames a room. */
+        val ROOM_TYPES = setOf(
+            DetectedObjectType.CABIN, DetectedObjectType.CONFERENCE_ROOM, DetectedObjectType.MEETING_ROOM,
+            DetectedObjectType.RECEPTION, DetectedObjectType.PANTRY, DetectedObjectType.WASHROOM,
+            DetectedObjectType.SERVER_ROOM, DetectedObjectType.STORAGE, DetectedObjectType.ZONE,
+            DetectedObjectType.WALKWAY, DetectedObjectType.EXIT
+        )
 
         /** A `d` attribute longer than this is a whole layer, not a room. */
         const val MAX_PATH_CHARS = 200_000
