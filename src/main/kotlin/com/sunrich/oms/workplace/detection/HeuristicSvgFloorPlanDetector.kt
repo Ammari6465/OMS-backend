@@ -3,7 +3,8 @@ package com.sunrich.oms.workplace.detection
 import org.slf4j.LoggerFactory
 import org.w3c.dom.Element
 import org.w3c.dom.NodeList
-import java.io.ByteArrayInputStream
+import org.xml.sax.InputSource
+import java.io.StringReader
 import javax.xml.parsers.DocumentBuilderFactory
 
 /**
@@ -20,15 +21,17 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
 
     /** Reads SVG markup only — a raster plan is invisible to this engine. */
     override fun supports(image: PlanImage) =
-        image.mediaType == "image/svg+xml" ||
-            String(image.bytes, Charsets.UTF_8).contains("<svg", ignoreCase = true)
+        image.mediaType == "image/svg+xml" || SvgSource.looksLikeSvg(image.bytes)
 
     override fun detect(image: PlanImage): List<DetectionCandidate> {
-        val content = String(image.bytes, Charsets.UTF_8).trim()
-        if (!content.contains("<svg", ignoreCase = true)) {
+        if (!supports(image)) {
             log.debug("Image is not an SVG file; skipping heuristic SVG detector")
             return emptyList()
         }
+        // Parse decoded text rather than raw bytes. Exports that declare one
+        // encoding and then write another are common enough that a byte-level
+        // parse fails on plans a person would call perfectly ordinary.
+        val xml = SvgSource.toXml(image.bytes)
         return try {
             val factory = DocumentBuilderFactory.newInstance().apply {
                 isNamespaceAware = false
@@ -37,7 +40,7 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
                 setFeature("http://xml.org/sax/features/external-parameter-entities", false)
             }
             val builder = factory.newDocumentBuilder()
-            val doc = builder.parse(ByteArrayInputStream(image.bytes))
+            val doc = builder.parse(InputSource(StringReader(xml)))
             val svg = doc.documentElement
 
             var viewWidth = parseDim(svg.getAttribute("width"))
@@ -145,8 +148,15 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
             }
             candidates.distinctBy { Pair(it.type, String.format("%.2f,%.2f", it.polygon.center.x, it.polygon.center.y)) }
         } catch (ex: Exception) {
-            log.warn("Heuristic SVG detection error: {}", ex.message)
-            emptyList()
+            // The file announced itself as SVG and then would not parse. That is
+            // a broken plan, not an empty one, and the caller has to be able to
+            // tell the two apart before telling anyone to redraw a floor by hand.
+            log.warn("Heuristic SVG detection failed for {}: {}", image.originalName, ex.message)
+            throw UnreadablePlanException(
+                "The plan file could not be read as SVG (${ex.message}). Re-export it as valid SVG, " +
+                    "or upload it as PNG or JPEG and enable vision detection.",
+                ex
+            )
         }
     }
 

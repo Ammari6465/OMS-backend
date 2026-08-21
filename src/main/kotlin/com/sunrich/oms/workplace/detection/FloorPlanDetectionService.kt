@@ -64,7 +64,14 @@ class FloorPlanDetectionService(
         existing.filterNot { it.isProtected }.forEach { it.markDeleted() }
         objects.saveAll(existing)
 
-        val candidates = detector.detect(image)
+        // Surface an unreadable plan as a plain error. Reported as an empty scan
+        // it looks identical to a plan with nothing on it, and the user spends
+        // an afternoon drawing a floor that a re-export would have solved.
+        val candidates = try {
+            detector.detect(image)
+        } catch (ex: UnreadablePlanException) {
+            throw BadRequestException(ex.message ?: "The floor plan could not be read.")
+        }
         val saved = objects.saveAll(numbered(candidates).map { (candidate, code) ->
             DetectedObject(
                 floor = floor,

@@ -40,11 +40,20 @@ class DetectionConfig {
                 heuristic.supports(image) || vision?.supports(image) == true
 
             override fun detect(image: PlanImage): List<DetectionCandidate> {
-                if (image.mediaType == "image/svg+xml" || String(image.bytes, Charsets.UTF_8).contains("<svg", ignoreCase = true)) {
-                    val heuristicResults = heuristic.detect(image)
+                if (heuristic.supports(image)) {
+                    // A broken SVG is worth reporting rather than swallowing —
+                    // unless a vision engine can still read the file, in which
+                    // case try that before giving up on the plan.
+                    val heuristicResults = try {
+                        heuristic.detect(image)
+                    } catch (ex: UnreadablePlanException) {
+                        if (vision?.supports(image) != true) throw ex
+                        log.info("SVG parse failed ({}); falling back to the vision detector", ex.message)
+                        emptyList()
+                    }
                     if (heuristicResults.isNotEmpty()) return heuristicResults
                 }
-                if (vision == null) return heuristic.detect(image)
+                if (vision == null) return emptyList()
 
                 val result = vision.detect(image)
                 if (result.size >= MIN_OBJECTS) return result
