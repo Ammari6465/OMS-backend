@@ -1,6 +1,7 @@
 package com.sunrich.oms.workplace.detection
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
@@ -8,9 +9,42 @@ import org.springframework.http.MediaType
 import org.springframework.test.web.client.MockRestServiceServer
 import org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo
 import org.springframework.test.web.client.response.MockRestResponseCreators.withStatus
+import org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess
 import org.springframework.web.client.RestClient
 
 class VisionFloorPlanDetectorTest {
+
+    @Test
+    fun `accepts compact bounding boxes for dense floor plans`() {
+        val props = properties()
+        val builder = RestClient.builder()
+        val server = MockRestServiceServer.bindTo(builder).build()
+        val content = """[{"type":"DESK","bbox":[0.1,0.2,0.04,0.03],"rotation":90,"confidence":0.9},{"type":"lift","bbox":{"x":0.8,"y":0.1,"width":0.05,"height":0.08}}]"""
+        server.expect(requestTo("https://vision.example.test/v1/chat/completions"))
+            .andRespond(withSuccess(response(content), MediaType.APPLICATION_JSON))
+
+        val found = VisionFloorPlanDetector(props, builder, ObjectMapper()).detect(image())
+
+        assertThat(found).hasSize(2)
+        assertThat(found.map { it.type }).containsExactly(DetectedObjectType.DESK, DetectedObjectType.ELEVATOR)
+        assertThat(found.first().polygon.area).isGreaterThan(0.0)
+        server.verify()
+    }
+
+    @Test
+    fun `recovers complete objects when a dense response is truncated`() {
+        val props = properties()
+        val builder = RestClient.builder()
+        val server = MockRestServiceServer.bindTo(builder).build()
+        val content = """[{"type":"DESK","bbox":[0.1,0.2,0.04,0.03]},{"type":"DOOR","bbox":[0.5,0.2,0.02,0.08]},{"type":"CABIN","bbox":[0.6"""
+        server.expect(requestTo("https://vision.example.test/v1/chat/completions"))
+            .andRespond(withSuccess(response(content), MediaType.APPLICATION_JSON))
+
+        val found = VisionFloorPlanDetector(props, builder, ObjectMapper()).detect(image())
+
+        assertThat(found.map { it.type }).containsExactly(DetectedObjectType.DESK, DetectedObjectType.DOOR)
+        server.verify()
+    }
 
     @Test
     fun `surfaces a retired model instead of reporting an empty floor plan`() {
@@ -41,4 +75,19 @@ class VisionFloorPlanDetectorTest {
             .hasMessageContaining("gemini-3.6-flash")
         server.verify()
     }
+
+    private fun properties() = DetectionProperties(
+        provider = "vision",
+        apiKey = "test-key",
+        baseUrl = "https://vision.example.test/v1",
+        model = "gemini-3.6-flash",
+        apiStyle = "openai",
+        preprocess = false
+    )
+
+    private fun image() = PlanImage(byteArrayOf(1, 2, 3), "image/png", "floor.png", 100, 100)
+
+    private fun response(content: String) = ObjectMapper().writeValueAsString(
+        mapOf("choices" to listOf(mapOf("message" to mapOf("content" to content))))
+    )
 }

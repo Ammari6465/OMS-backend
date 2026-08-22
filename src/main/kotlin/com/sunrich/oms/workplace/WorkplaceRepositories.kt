@@ -54,6 +54,7 @@ interface DeskRepository:JpaRepository<Desk,Long>,JpaSpecificationExecutor<Desk>
 }
 
 interface DeskAssignmentRepository:JpaRepository<DeskAssignment,Long>,JpaSpecificationExecutor<DeskAssignment>{
+ fun findAllByDesk_IdInAndIsDeletedFalse(deskIds:Collection<Long>):List<DeskAssignment>
  @Query("select a from DeskAssignment a where a.staff.id=:staffId and a.isDeleted=false and a.primaryAssignment=true and a.effectiveFrom<=:date and (a.effectiveTo is null or a.effectiveTo>:date) order by a.effectiveFrom desc") fun activeForStaff(@Param("staffId")staffId:Long,@Param("date")date:LocalDate):List<DeskAssignment>
  @Query("select a from DeskAssignment a where a.desk.id=:deskId and a.isDeleted=false and a.effectiveFrom<=:date and (a.effectiveTo is null or a.effectiveTo>:date) order by a.effectiveFrom desc") fun activeForDesk(@Param("deskId")deskId:Long,@Param("date")date:LocalDate):List<DeskAssignment>
  @Query("select a from DeskAssignment a where a.staff.id=:staffId and a.isDeleted=false and a.effectiveFrom<:to and (a.effectiveTo is null or a.effectiveTo>:from)") fun overlappingStaff(@Param("staffId")staffId:Long,@Param("from")from:LocalDate,@Param("to")to:LocalDate):List<DeskAssignment>
@@ -68,4 +69,3 @@ interface DeskAssignmentRepository:JpaRepository<DeskAssignment,Long>,JpaSpecifi
  @Query("select a from DeskAssignment a join fetch a.desk d join fetch d.floor f join fetch f.building b join fetch b.office join fetch a.staff join fetch a.assignedBy where a.isDeleted=false and a.effectiveTo=:date") fun endingOn(@Param("date")date:LocalDate):List<DeskAssignment>
  @Query("select count(distinct a.staff.id) from DeskAssignment a where a.desk.floor.building.office.company.id in :companyIds and a.isDeleted=false and a.primaryAssignment=true and a.effectiveFrom<=:date and (a.effectiveTo is null or a.effectiveTo>:date)") fun countAssignedStaff(@Param("companyIds")companyIds:Collection<Long>,@Param("date")date:LocalDate):Long
 }
-

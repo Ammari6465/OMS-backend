@@ -86,6 +86,22 @@ class FloorPlanDetectionIntegrationTest {
     }
 
     @Test
+    fun `detection persists every supported object classification`() {
+        StubDetector.candidates = DetectedObjectType.entries.mapIndexed { index, type ->
+            DetectionCandidate(
+                type = type,
+                polygon = Polygon.rectangle(0.01 + index * 0.02, 0.1, 0.01, 0.01),
+                confidence = 0.8
+            )
+        }
+
+        val run = service.detect(floorId)
+
+        assertThat(run.objects.map { it.type })
+            .containsExactlyInAnyOrderElementsOf(DetectedObjectType.entries)
+    }
+
+    @Test
     fun `re-running detection keeps human corrections and replaces automatic ones`() {
         StubDetector.candidates = listOf(desk(0.1, 0.1), desk(0.3, 0.1))
         val first = service.detect(floorId)
@@ -107,6 +123,52 @@ class FloorPlanDetectionIntegrationTest {
         assertThat(kept.source).isEqualTo(DetectionSource.EDITED)
         // The untouched automatic desk from the first run is gone.
         assertThat(second.objects.filter { it.type == DetectedObjectType.DESK }).hasSize(1)
+    }
+
+    @Test
+    fun `clean re-scan replaces automatic and human corrected overlays`() {
+        StubDetector.candidates = listOf(desk(0.1, 0.1), desk(0.3, 0.1))
+        val first = service.detect(floorId)
+        service.applyEdits(floorId, DetectionEditRequest(objects = listOf(
+            DetectedObjectRequest(
+                id = first.objects.first().id, type = DetectedObjectType.CABIN, name = "Old correction",
+                polygon = Polygon.rectangle(0.5, 0.5, 0.2, 0.2).serialise()
+            )
+        )))
+
+        StubDetector.candidates = listOf(desk(0.7, 0.7))
+        val fresh = service.rescan(floorId)
+
+        assertThat(fresh.preserved).isZero()
+        assertThat(fresh.objects).hasSize(1)
+        assertThat(fresh.objects.single().type).isEqualTo(DetectedObjectType.DESK)
+    }
+
+    @Test
+    fun `clearing scan overlays leaves promoted workplace desks in place`() {
+        StubDetector.candidates = listOf(desk(0.1, 0.1), desk(0.3, 0.1))
+        service.detect(floorId)
+        service.promoteDesks(floorId)
+
+        assertThat(service.clear(floorId)).isEqualTo(2)
+        assertThat(service.list(floorId)).isEmpty()
+        assertThat(workplace.listDesks(floorId, false)).hasSize(2)
+    }
+
+    @Test
+    fun `clearing map contents removes desks zones and overlays but keeps plan image`() {
+        workplace.createZone(ZoneRequest(floorId, "Main Zone", "MAIN"))
+        StubDetector.candidates = listOf(desk(0.1, 0.1), desk(0.3, 0.1))
+        service.detect(floorId)
+        service.promoteDesks(floorId)
+
+        val result = service.clearMapContents(floorId)
+
+        assertThat(result).isEqualTo(MapContentsClearResponse(2, 1, 0, 2))
+        assertThat(service.list(floorId)).isEmpty()
+        assertThat(workplace.listDesks(floorId, false)).isEmpty()
+        assertThat(workplace.listZones(floorId, false)).isEmpty()
+        assertThat(workplace.plan(floorId).first).isNotEmpty()
     }
 
     @Test

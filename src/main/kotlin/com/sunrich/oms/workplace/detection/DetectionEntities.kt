@@ -12,7 +12,7 @@ import jakarta.persistence.*
  */
 enum class DetectedObjectType {
     DESK, CABIN, CONFERENCE_ROOM, MEETING_ROOM, RECEPTION, PANTRY, WASHROOM,
-    SERVER_ROOM, STORAGE, ZONE, WALKWAY, EXIT, UNKNOWN;
+    SERVER_ROOM, STORAGE, ZONE, WALKWAY, DOOR, STAIRCASE, ELEVATOR, EXIT, UNKNOWN;
 
     companion object {
         /** Lenient parse for model output, which is free text however hard we prompt. */
@@ -29,6 +29,9 @@ enum class DetectedObjectType {
                 key.contains("SERVER") || key.contains("IT_") -> SERVER_ROOM
                 key.contains("STORE") || key.contains("STORAGE") -> STORAGE
                 key.contains("CORRIDOR") || key.contains("WALKWAY") || key.contains("PASSAGE") -> WALKWAY
+                key.contains("DOOR") || key.contains("ENTRANCE") -> DOOR
+                key.contains("STAIR") -> STAIRCASE
+                key.contains("ELEVATOR") || key.contains("LIFT") -> ELEVATOR
                 key.contains("EXIT") || key.contains("EVACUATION") -> EXIT
                 key.contains("DESK") || key.contains("WORKSTATION") || key.contains("SEAT") -> DESK
                 key.contains("ZONE") || key.contains("OPEN") -> ZONE

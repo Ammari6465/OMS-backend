@@ -183,44 +183,97 @@ class VisionFloorPlanDetector(
         // truncates the others down to prose, yielding "no objects found".
         val start = content.indexOf('[')
         val end = content.lastIndexOf(']')
-        if (start < 0 || end <= start) {
+        if (start < 0) {
             log.warn(
                 "Vision model returned no JSON array. First {} chars of the response: {}",
                 RESPONSE_LOG_CHARS, content.take(RESPONSE_LOG_CHARS)
             )
             return emptyList()
         }
+        if (end > start) runCatching {
+            val root = mapper.readTree(content.substring(start, end + 1))
+            if (root.isArray) return root.mapNotNull(::candidate)
+        }.onFailure { ex ->
+            log.warn("Vision model returned malformed JSON ({}); recovering complete objects", ex.message)
+        }
+
+        // Dense plans can contain 100+ individual workstations. If the provider
+        // reaches its output-token ceiling, the outer array is left open. Keep
+        // every complete object instead of turning a useful partial scan into
+        // the same empty result as a genuinely blank plan.
+        val recovered = completeObjects(content.substring(start)).mapNotNull { raw ->
+            runCatching { candidate(mapper.readTree(raw)) }.getOrNull()
+        }
+        if (recovered.isNotEmpty()) {
+            log.warn("Recovered {} complete detections from a truncated vision response", recovered.size)
+        }
+        return recovered
+    }
+
+    /** Extracts balanced top-level JSON objects while respecting braces inside strings. */
+    private fun completeObjects(content: String): List<String> {
+        val objects = mutableListOf<String>()
+        var depth = 0
+        var start = -1
+        var quoted = false
+        var escaped = false
+        content.forEachIndexed { index, char ->
+            if (quoted) {
+                if (escaped) escaped = false
+                else if (char == '\\') escaped = true
+                else if (char == '"') quoted = false
+                return@forEachIndexed
+            }
+            if (char == '"') quoted = true
+            else if (char == '{') {
+                if (depth == 0) start = index
+                depth++
+            } else if (char == '}' && depth > 0) {
+                depth--
+                if (depth == 0 && start >= 0) {
+                    objects += content.substring(start, index + 1)
+                    start = -1
+                }
+            }
+        }
+        return objects
+    }
+
+    private fun candidate(node: JsonNode): DetectionCandidate? {
         return try {
-            mapper.readTree(content.substring(start, end + 1)).mapNotNull(::candidate)
-        } catch (ex: Exception) {
-            // A truncated response leaves unbalanced JSON. Say so plainly: the
-            // usual fix is a larger token budget, not a different plan.
-            log.warn(
-                "Vision model returned malformed JSON ({}). It may have been truncated; " +
-                    "consider raising oms.workplace.detection.max-tokens (currently {}).",
-                ex.message, props.maxTokens
+            val polygon = polygon(node) ?: return null
+            DetectionCandidate(
+                type = DetectedObjectType.parse(node.path("type").asText(null)),
+                polygon = polygon,
+                name = node.path("name").asText(null)?.trim()?.take(200)?.takeIf { it.isNotEmpty() },
+                ocrText = node.path("text").asText(null)?.trim()?.take(1000)?.takeIf { it.isNotEmpty() },
+                rotation = node.path("rotation").asInt(0).mod(360),
+                confidence = node.path("confidence").asDouble(0.5).coerceIn(0.0, 1.0)
             )
-            emptyList()
+        } catch (ex: Exception) {
+            log.debug("Skipping malformed detection entry", ex)
+            null
         }
     }
 
-    private fun candidate(node: JsonNode): DetectionCandidate? = try {
+    /** Accepts compact boxes for repeated furniture and point polygons for irregular rooms. */
+    private fun polygon(node: JsonNode): Polygon? {
         val points = node.path("polygon").mapNotNull { point ->
-            val x = point.path("x").takeIf { it.isNumber }?.asDouble()
-            val y = point.path("y").takeIf { it.isNumber }?.asDouble()
-            if (x == null || y == null) null else Point(x, y)
+            val x = if (point.isArray) point.path(0) else point.path("x")
+            val y = if (point.isArray) point.path(1) else point.path("y")
+            if (!x.isNumber || !y.isNumber) null else Point(x.asDouble(), y.asDouble())
         }
-        if (points.size < 3) null else DetectionCandidate(
-            type = DetectedObjectType.parse(node.path("type").asText(null)),
-            polygon = Polygon.ofClamped(points),
-            name = node.path("name").asText(null)?.trim()?.take(200)?.takeIf { it.isNotEmpty() },
-            ocrText = node.path("text").asText(null)?.trim()?.take(1000)?.takeIf { it.isNotEmpty() },
-            rotation = node.path("rotation").asInt(0).mod(360),
-            confidence = node.path("confidence").asDouble(0.5).coerceIn(0.0, 1.0)
-        )
-    } catch (ex: Exception) {
-        log.debug("Skipping malformed detection entry", ex)
-        null
+        if (points.size >= 3) return Polygon.ofClamped(points).takeIf { it.area > 0.0 }
+
+        val box = node.path("bbox")
+        val x = if (box.isArray) box.path(0) else box.path("x")
+        val y = if (box.isArray) box.path(1) else box.path("y")
+        val width = if (box.isArray) box.path(2) else box.path("width")
+        val height = if (box.isArray) box.path(3) else box.path("height")
+        if (!x.isNumber || !y.isNumber || !width.isNumber || !height.isNumber) return null
+        if (width.asDouble() <= 0.0 || height.asDouble() <= 0.0) return null
+        return Polygon.rectangle(x.asDouble(), y.asDouble(), width.asDouble(), height.asDouble())
+            .takeIf { it.area > 0.0 }
     }
 
     private companion object {
@@ -236,13 +289,18 @@ class VisionFloorPlanDetector(
             Return ONLY a JSON array. Each element must be:
             {
               "type": one of DESK, CABIN, CONFERENCE_ROOM, MEETING_ROOM, RECEPTION, PANTRY,
-                      WASHROOM, SERVER_ROOM, STORAGE, ZONE, WALKWAY, EXIT,
+                      WASHROOM, SERVER_ROOM, STORAGE, ZONE, WALKWAY, DOOR, STAIRCASE,
+                      ELEVATOR, EXIT,
+              "bbox": [x, y, width, height],
               "name": the label printed on the plan, or null if unlabelled,
-              "text": any other text you can read inside the region, or null,
-              "polygon": [{"x":0.0,"y":0.0}, ...] tracing the region boundary,
               "rotation": integer degrees the furniture faces, 0 if unclear,
               "confidence": 0.0 to 1.0
             }
+
+            - Keep the response compact. Use bbox for every rectangular desk, room,
+              door, stair, lift, and zone. Only replace bbox with
+              "polygon":[[x,y], ...] when an irregular boundary materially matters.
+            - Omit "text" unless readable text adds information beyond "name".
 
             Rules:
             - Coordinates are fractions of the image: x from 0 (left) to 1 (right),
@@ -263,7 +321,13 @@ class VisionFloorPlanDetector(
               one large executive desk and 1-2 visitor chairs — are CABIN type.
             - Look for rows of identically sized enclosed rooms along an exterior
               wall. 4-6 such rooms in a row is a common pattern.
-            - Each cabin gets its own polygon following its walls.
+            - Each cabin gets its own bbox following its enclosing walls.
+
+            ACCESS AND VERTICAL CIRCULATION:
+            - Emit DOOR for ordinary door openings and ENTRANCE doors, but EXIT only
+              when an exterior/emergency exit is genuinely visible.
+            - Emit STAIRCASE for stair flights/landings and ELEVATOR for lift cars or
+              lift shafts. Do not misclassify washroom stalls as lifts.
 
             CONFERENCE AND MEETING ROOMS:
             - A large table ringed by many chairs (8+) in an enclosed room is a

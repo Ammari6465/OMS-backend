@@ -602,6 +602,9 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
             u.contains("STORAGE") || u.contains("STORE") || u.contains("ARCHIVE") -> DetectedObjectType.STORAGE
             u.contains("ZONE") || u.contains("BAY") || u.contains("WORKSPACE") -> DetectedObjectType.ZONE
             u.contains("CORRIDOR") || u.contains("WALKWAY") || u.contains("PASSAGE") -> DetectedObjectType.WALKWAY
+            u.contains("DOOR") || u.contains("ENTRANCE") -> DetectedObjectType.DOOR
+            u.contains("STAIR") -> DetectedObjectType.STAIRCASE
+            u.contains("ELEVATOR") || u.contains("LIFT") -> DetectedObjectType.ELEVATOR
             u.contains("EXIT") || u.contains("FIRE") -> DetectedObjectType.EXIT
             u.startsWith("D-") || u.matches(Regex("^[A-Z]\\d+$")) -> DetectedObjectType.DESK
             else -> DetectedObjectType.UNKNOWN
@@ -656,7 +659,8 @@ class HeuristicSvgFloorPlanDetector : FloorPlanDetector {
             DetectedObjectType.CABIN, DetectedObjectType.CONFERENCE_ROOM, DetectedObjectType.MEETING_ROOM,
             DetectedObjectType.RECEPTION, DetectedObjectType.PANTRY, DetectedObjectType.WASHROOM,
             DetectedObjectType.SERVER_ROOM, DetectedObjectType.STORAGE, DetectedObjectType.ZONE,
-            DetectedObjectType.WALKWAY, DetectedObjectType.EXIT
+            DetectedObjectType.WALKWAY, DetectedObjectType.DOOR, DetectedObjectType.STAIRCASE,
+            DetectedObjectType.ELEVATOR, DetectedObjectType.EXIT
         )
 
         /** A `d` attribute longer than this is a whole layer, not a room. */

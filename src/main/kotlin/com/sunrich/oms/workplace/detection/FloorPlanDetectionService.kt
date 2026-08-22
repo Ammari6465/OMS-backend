@@ -55,7 +55,13 @@ class FloorPlanDetectionService(
      * point of the edit surface is that corrections stick.
      */
     @Transactional
-    fun detect(floorId: Long): DetectionRunResponse {
+    fun detect(floorId: Long): DetectionRunResponse = detect(floorId, preserveHumanEdits = true)
+
+    /** A clean scan intentionally discards manual/edited recognition overlays too. */
+    @Transactional
+    fun rescan(floorId: Long): DetectionRunResponse = detect(floorId, preserveHumanEdits = false)
+
+    private fun detect(floorId: Long, preserveHumanEdits: Boolean): DetectionRunResponse {
         val floor = workplace.requireManageableFloor(floorId)
         if (!detector.available) {
             throw BadRequestException(
@@ -82,8 +88,8 @@ class FloorPlanDetectionService(
             )
         }
         val existing = objects.findAllByFloor_IdAndIsDeletedFalseOrderByIdAsc(floorId)
-        val protected = existing.filter { it.isProtected }
-        existing.filterNot { it.isProtected }.forEach { it.markDeleted() }
+        val protected = if (preserveHumanEdits) existing.filter { it.isProtected } else emptyList()
+        existing.filterNot { preserveHumanEdits && it.isProtected }.forEach { it.markDeleted() }
         objects.saveAll(existing)
 
         // Surface an unreadable plan as a plain error. Reported as an empty scan
@@ -122,6 +128,25 @@ class FloorPlanDetectionService(
                 "Recognised ${saved.size} objects. ${protected.size} manual corrections were kept."
             }
         )
+    }
+
+    /** Clears recognition overlays only. Real desks promoted from them remain workplace records. */
+    @Transactional
+    fun clear(floorId: Long): Int {
+        workplace.requireManageableFloor(floorId)
+        val existing = objects.findAllByFloor_IdAndIsDeletedFalseOrderByIdAsc(floorId)
+        existing.forEach { it.markDeleted() }
+        objects.saveAll(existing)
+        workplace.recordFloorAudit(floorId, AuditAction.UPDATE, "detectedObjectsCleared=${existing.size}")
+        return existing.size
+    }
+
+    /** Atomically empties desks, zones, assignments and recognition overlays, but keeps the image. */
+    @Transactional
+    fun clearMapContents(floorId: Long): MapContentsClearResponse {
+        val contents = workplace.clearFloorContents(floorId)
+        val detected = clear(floorId)
+        return MapContentsClearResponse(contents.desks, contents.zones, contents.assignments, detected)
     }
 
     /** Bulk save from the edit surface. Every write marks the object human-owned. */

@@ -50,6 +50,21 @@ class WorkplaceService(
  fun plan(floorId:Long):Triple<ByteArray,String,String>{val f=readableFloor(floorId);val ref=f.planStorageRef?:throw ResourceNotFoundException("Floor plan");return Triple(storage.read(ref),f.planMediaType?:"application/octet-stream",f.planOriginalName?:"floor-plan")}
  @Transactional fun removePlan(floorId:Long){val f=ownedFloor(floorId);val old=f.planStorageRef?:return;f.planStorageRef=null;f.planOriginalName=null;f.planMediaType=null;f.planWidth=null;f.planHeight=null;floors.save(f);storage.delete(old);record(company(f),"Floor",floorId,AuditAction.UPDATE,"plan=present","plan=removed")}
 
+ /** Empties every editable workplace record on a floor but retains its uploaded plan image. */
+ @Transactional fun clearFloorContents(floorId:Long):FloorContentsClearResult{
+  val f=ownedFloor(floorId)
+  val floorDesks=desks.findAllByFloor_IdAndIsDeletedFalseOrderByCode(floorId)
+  val deskIds=floorDesks.mapNotNull{it.id}
+  val floorAssignments=if(deskIds.isEmpty())emptyList() else assignments.findAllByDesk_IdInAndIsDeletedFalse(deskIds)
+  floorAssignments.forEach{it.markDeleted()};assignments.saveAll(floorAssignments)
+  floorDesks.forEach{it.markDeleted()};desks.saveAll(floorDesks)
+  val floorZones=zones.findAllByFloor_IdAndIsDeletedFalseOrderByName(floorId)
+  floorZones.forEach{it.markDeleted()};zones.saveAll(floorZones)
+  val result=FloorContentsClearResult(floorDesks.size,floorZones.size,floorAssignments.size)
+  record(company(f),"Floor",floorId,AuditAction.DELETE,null,"mapContentsCleared:desks=${result.desks},zones=${result.zones},assignments=${result.assignments}")
+  return result
+ }
+
  @Transactional fun assign(r:AssignmentRequest):AssignmentResponse{val d=ownedDesk(r.deskId);val s=staff.findById(r.staffId).orElseThrow{ResourceNotFoundException("Staff",r.staffId)};if(s.isDeleted||s.status!=EntityStatus.ACTIVE)throw BadRequestException("Only active staff can receive a desk assignment");if(s.company.id!=company(d))cross();if(d.isDeleted||d.status!=EntityStatus.ACTIVE||d.mode==DeskMode.UNAVAILABLE||d.availability==DeskAvailability.UNAVAILABLE)throw ConflictException("Desk is unavailable");if(r.effectiveTo!=null&&r.effectiveTo<r.effectiveFrom)throw BadRequestException("Assignment end date cannot precede its start date");val far=r.effectiveTo?:LocalDate.of(9999,12,31);if(r.primaryAssignment&&assignments.overlappingStaff(s.id!!,r.effectiveFrom,far).any{it.primaryAssignment})throw ConflictException("Staff already has an overlapping primary desk assignment");if(d.mode==DeskMode.ASSIGNED&&assignments.overlappingDesk(d.id!!,r.effectiveFrom,far).isNotEmpty())throw ConflictException("Desk already has an overlapping permanent assignment");val a=assignments.save(DeskAssignment(d,s,r.effectiveFrom,r.effectiveTo,r.primaryAssignment,r.reason?.trim(),actor()));syncAvailability(d);record(company(d),"DeskAssignment",a.id,AuditAction.CREATE,null,assignmentAudit(a));notifyActor(NotificationType.DESK_ASSIGNED,"${s.name} assigned to desk ${d.code}","/workplaces/floors/${d.floor.id}/map?deskId=${d.id}",a.id);return assignment(a)}
  @Transactional fun transfer(assignmentId:Long,r:TransferRequest):AssignmentResponse{val old=ownedAssignment(assignmentId);val target=ownedDesk(r.targetDeskId);if(company(old.desk)!=company(target))cross();releaseInternal(old,r.effectiveDate,r.reason?:"Desk transfer");return assign(AssignmentRequest(target.id!!,old.staff.id!!,r.effectiveDate,null,old.primaryAssignment,r.reason?:"Desk transfer")).also{notifyActor(NotificationType.DESK_TRANSFERRED,"${old.staff.name} transferred to desk ${target.code}","/workplaces/floors/${target.floor.id}/map?deskId=${target.id}",it.id)}}
  @Transactional fun release(id:Long,r:ReleaseRequest):AssignmentResponse{val a=ownedAssignment(id);version(a.version,r.version);releaseInternal(a,r.effectiveTo,r.reason?:"Released");notifyActor(NotificationType.DESK_RELEASED,"${a.staff.name} released from desk ${a.desk.code}","/workplaces/floors/${a.desk.floor.id}/map?deskId=${a.desk.id}",a.id);return assignment(a)}

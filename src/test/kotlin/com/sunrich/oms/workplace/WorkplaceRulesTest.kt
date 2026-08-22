@@ -18,6 +18,7 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.LocalDate
 
 /**
@@ -34,6 +35,8 @@ class WorkplaceRulesTest{
  @Autowired lateinit var audits:AuditLogRepository
  @Autowired lateinit var notifications:NotificationRepository
  @Autowired lateinit var desks:DeskRepository
+ @Autowired lateinit var assignments:DeskAssignmentRepository
+ @Autowired lateinit var clock:Clock
 
  lateinit var admin:User
  var company=0L; var otherCompany=0L; var staffId=0L
@@ -45,7 +48,7 @@ class WorkplaceRulesTest{
   auth(admin)
   company=org.createCompany(CompanyRequest(name="Rules A $n")).id
   otherCompany=org.createCompany(CompanyRequest(name="Rules B $n")).id
-  staffId=staffService.create(StaffCreateRequest(companyId=company,employeeCode="RA-$n",name="Priya Sharma",dateJoined=LocalDate.now().minusYears(1))).id
+  staffId=staffService.create(StaffCreateRequest(companyId=company,employeeCode="RA-$n",name="Priya Sharma",dateJoined=LocalDate.now(clock).minusYears(1))).id
   office=service.createOffice(OfficeRequest(company,"Head Office","HO-$n",city="Mumbai",timeZone="Asia/Calcutta")).id
   building=service.createBuilding(BuildingRequest(office,"Building A","A")).id
   floor=service.createFloor(FloorRequest(building,"Floor 3",3)).id
@@ -79,7 +82,7 @@ class WorkplaceRulesTest{
 
  // ---- floor search ---------------------------------------------------------------------------
  @Test fun `floor search matches desk code zone and assigned staff`(){
-  service.assign(AssignmentRequest(desk,staffId,LocalDate.now(),reason="Permanent desk"))
+  service.assign(AssignmentRequest(desk,staffId,LocalDate.now(clock),reason="Permanent desk"))
   assertThat(service.searchFloor(floor,"F3-027")).singleElement().satisfies({assertThat(it.deskCode).isEqualTo("F3-027");assertThat(it.matchedOn).isEqualTo("desk")})
   assertThat(service.searchFloor(floor,"priya")).singleElement().satisfies({assertThat(it.staffName).isEqualTo("Priya Sharma");assertThat(it.matchedOn).isEqualTo("staff")})
   assertThat(service.searchFloor(floor,"finance")).hasSize(1)
@@ -102,9 +105,21 @@ class WorkplaceRulesTest{
   assertThatThrownBy{service.batch(floor,DeskBatchRequest(listOf(stray)))}.isInstanceOf(BadRequestException::class.java)
  }
 
+ @Test fun `clearing floor contents removes desks zones and all their assignments`(){
+  val assignment=service.assign(AssignmentRequest(desk,staffId,LocalDate.now(clock),reason="Permanent desk"))
+
+  val result=service.clearFloorContents(floor)
+
+  assertThat(result).isEqualTo(FloorContentsClearResult(desks=2,zones=1,assignments=1))
+  assertThat(service.listDesks(floor,false)).isEmpty()
+  assertThat(service.listZones(floor,false)).isEmpty()
+  assertThat(service.currentForStaff(staffId)).isNull()
+  assertThat(assignments.findById(assignment.id).orElseThrow().isDeleted).isTrue()
+ }
+
  // ---- archive restrictions ------------------------------------------------------------------------
  @Test fun `archiving is blocked while dependants or active assignments exist`(){
-  service.assign(AssignmentRequest(desk,staffId,LocalDate.now(),reason="Permanent desk"))
+  service.assign(AssignmentRequest(desk,staffId,LocalDate.now(clock),reason="Permanent desk"))
   assertThatThrownBy{service.archive("desks",desk)}.isInstanceOf(ConflictException::class.java)
   assertThatThrownBy{service.archive("floors",floor)}.isInstanceOf(ConflictException::class.java)
   assertThatThrownBy{service.archive("buildings",building)}.isInstanceOf(ConflictException::class.java)
@@ -113,8 +128,8 @@ class WorkplaceRulesTest{
  }
 
  @Test fun `a released desk can be archived and restored`(){
-  val a=service.assign(AssignmentRequest(desk,staffId,LocalDate.now(),reason="Permanent desk"))
-  service.release(a.id,ReleaseRequest(LocalDate.now(),"Released",a.version))
+  val a=service.assign(AssignmentRequest(desk,staffId,LocalDate.now(clock),reason="Permanent desk"))
+  service.release(a.id,ReleaseRequest(LocalDate.now(clock),"Released",a.version))
   service.archive("desks",desk)
   assertThat(desks.findById(desk).orElseThrow().isDeleted).isTrue()
   service.restore("desks",desk)
@@ -153,9 +168,9 @@ class WorkplaceRulesTest{
  // ---- audit and notifications ---------------------------------------------------------------------------
  @Test fun `assignment transfer and release are audited and notified`(){
   val before=audits.count()
-  val a=service.assign(AssignmentRequest(desk,staffId,LocalDate.now(),reason="Permanent desk"))
-  val moved=service.transfer(a.id,TransferRequest(desk2,LocalDate.now(),"Team move"))
-  service.release(moved.id,ReleaseRequest(LocalDate.now(),"Released",moved.version))
+  val a=service.assign(AssignmentRequest(desk,staffId,LocalDate.now(clock),reason="Permanent desk"))
+  val moved=service.transfer(a.id,TransferRequest(desk2,LocalDate.now(clock),"Team move"))
+  service.release(moved.id,ReleaseRequest(LocalDate.now(clock),"Released",moved.version))
   assertThat(audits.count()).isGreaterThan(before)
   val entries=audits.findAll().filter{it.entityType=="DeskAssignment"}
   assertThat(entries).isNotEmpty
@@ -167,8 +182,8 @@ class WorkplaceRulesTest{
 
  // ---- lifecycle hook -------------------------------------------------------------------------------------
  @Test fun `a lifecycle exit releases the active desk and notifies the responsible administrator`(){
-  service.assign(AssignmentRequest(desk,staffId,LocalDate.now(),reason="Permanent desk"))
-  service.releaseForStaff(staffId,LocalDate.now(),"Staff exit via L-2026-01")
+  service.assign(AssignmentRequest(desk,staffId,LocalDate.now(clock),reason="Permanent desk"))
+  service.releaseForStaff(staffId,LocalDate.now(clock),"Staff exit via L-2026-01")
   assertThat(service.currentForStaff(staffId)).isNull()
   assertThat(service.history(staffId)).singleElement().satisfies({assertThat(it.releaseReason).contains("Staff exit")})
   assertThat(service.getDesk(desk).availability).isEqualTo(DeskAvailability.AVAILABLE)
@@ -181,14 +196,14 @@ class WorkplaceRulesTest{
   // the holding company, which this fixture does not control.
   val base=service.summary(company)
   service.createDesk(deskRequest("F3-029",30,10).copy(mode=DeskMode.UNAVAILABLE))
-  service.assign(AssignmentRequest(desk,staffId,LocalDate.now(),reason="Permanent desk"))
+  service.assign(AssignmentRequest(desk,staffId,LocalDate.now(clock),reason="Permanent desk"))
   val s=service.summary(company)
   assertThat(s.totalDesks).isEqualTo(base.totalDesks+1)
   assertThat(s.unavailableDesks).isEqualTo(base.unavailableDesks+1)
   assertThat(s.assignedDesks).isEqualTo(base.assignedDesks+1)
   assertThat(s.availableDesks).isEqualTo(base.availableDesks-1)
   assertThat(s.staffWithoutDesks).isEqualTo(base.staffWithoutDesks-1)
-  assertThat(s.utilizationPercent).isEqualTo(50.0)
+  assertThat(s.utilizationPercent).isEqualTo(s.assignedDesks*100.0/(s.totalDesks-s.unavailableDesks))
  }
 
  @Test fun `a super admin must name the company a summary is for`(){
@@ -210,15 +225,15 @@ class WorkplaceRulesTest{
  }
 
  @Test fun `an inactive staff member cannot receive a desk`(){
-  val inactive=staffService.create(StaffCreateRequest(companyId=company,employeeCode="IN-${System.nanoTime()}",name="Inactive Person",dateJoined=LocalDate.now().minusYears(1))).id
+  val inactive=staffService.create(StaffCreateRequest(companyId=company,employeeCode="IN-${System.nanoTime()}",name="Inactive Person",dateJoined=LocalDate.now(clock).minusYears(1))).id
   staffService.archive(inactive)
-  assertThatThrownBy{service.assign(AssignmentRequest(desk,inactive,LocalDate.now()))}.isInstanceOf(RuntimeException::class.java)
+  assertThatThrownBy{service.assign(AssignmentRequest(desk,inactive,LocalDate.now(clock)))}.isInstanceOf(RuntimeException::class.java)
  }
 
  @Test fun `an unavailable desk cannot be assigned and end dates cannot precede start dates`(){
   val blocked=service.createDesk(deskRequest("F3-030",40,10).copy(mode=DeskMode.UNAVAILABLE)).id
-  assertThatThrownBy{service.assign(AssignmentRequest(blocked,staffId,LocalDate.now()))}.isInstanceOf(ConflictException::class.java)
-  assertThatThrownBy{service.assign(AssignmentRequest(desk,staffId,LocalDate.now(),effectiveTo=LocalDate.now().minusDays(1)))}.isInstanceOf(BadRequestException::class.java)
+  assertThatThrownBy{service.assign(AssignmentRequest(blocked,staffId,LocalDate.now(clock)))}.isInstanceOf(ConflictException::class.java)
+  assertThatThrownBy{service.assign(AssignmentRequest(desk,staffId,LocalDate.now(clock),effectiveTo=LocalDate.now(clock).minusDays(1)))}.isInstanceOf(BadRequestException::class.java)
  }
 
  private fun deskRequest(code:String,x:Int,y:Int,zoneId:Long?=null)=

@@ -35,10 +35,31 @@ class DetectionController(private val service: FloorPlanDetectionService) {
         return ApiResponse.ok(result, result.message)
     }
 
+    @PostMapping("/rescan")
+    @PreAuthorize(MANAGE)
+    fun rescan(@PathVariable floorId: Long): ApiResponse<DetectionRunResponse> {
+        val result = service.rescan(floorId)
+        return ApiResponse.ok(result, result.message)
+    }
+
     @PutMapping("/objects")
     @PreAuthorize(MANAGE)
     fun save(@PathVariable floorId: Long, @Valid @RequestBody request: DetectionEditRequest) =
         ApiResponse.ok(service.applyEdits(floorId, request), "Floor plan objects saved")
+
+    @DeleteMapping("/objects")
+    @PreAuthorize(MANAGE)
+    fun clear(@PathVariable floorId: Long): ApiResponse<Unit> {
+        val removed = service.clear(floorId)
+        return ApiResponse.ok("Cleared $removed detected floor plan objects")
+    }
+
+    @DeleteMapping("/contents")
+    @PreAuthorize(MANAGE)
+    fun clearMapContents(@PathVariable floorId: Long): ApiResponse<MapContentsClearResponse> {
+        val result = service.clearMapContents(floorId)
+        return ApiResponse.ok(result, "Floor map contents cleared")
+    }
 
     @PostMapping("/objects/promote-desks")
     @PreAuthorize(MANAGE)
