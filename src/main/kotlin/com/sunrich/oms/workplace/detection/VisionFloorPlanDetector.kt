@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.http.MediaType
 import org.springframework.web.client.RestClient
+import org.springframework.web.client.RestClientResponseException
 import org.springframework.web.client.body
 import java.util.Base64
 
@@ -88,11 +89,33 @@ class VisionFloorPlanDetector(
             val candidates = parse(content).take(props.maxObjects)
             if (prepared == null || !prepared.isCropped) candidates
             else candidates.map { it.copy(polygon = prepared.toOriginal(it.polygon)) }
+        } catch (ex: RestClientResponseException) {
+            // A retired model, invalid key, quota failure, or bad provider
+            // configuration is not an empty floor plan. Returning [] here made
+            // the UI announce a successful scan and tell the user to redraw the
+            // whole office manually. Fail the request so the transaction keeps
+            // the previous detections and the API can show the real diagnosis.
+            val detail = providerError(ex)
+            log.warn(
+                "Vision provider rejected floor plan detection for {} (HTTP {}): {}",
+                image.originalName, ex.statusCode.value(), detail
+            )
+            throw UnreadablePlanException("Floor plan recognition provider error: $detail", ex)
         } catch (ex: Exception) {
-            log.warn("Floor plan detection failed for {}", image.originalName, ex)
-            emptyList()
+            log.warn("Floor plan detection failed for {}: {}", image.originalName, ex.message)
+            throw UnreadablePlanException(
+                "Floor plan recognition failed: ${ex.message ?: "the vision provider did not return a usable response"}.",
+                ex
+            )
         }
     }
+
+    /** Pulls the provider's useful message out of either an object or array error envelope. */
+    private fun providerError(ex: RestClientResponseException): String = runCatching {
+        val root = mapper.readTree(ex.responseBodyAsString)
+        val envelope = if (root.isArray) root.firstOrNull() else root
+        envelope?.path("error")?.path("message")?.asText()?.takeIf { it.isNotBlank() }
+    }.getOrNull() ?: "HTTP ${ex.statusCode.value()} ${ex.statusText}"
 
     private fun request(image: PlanImage): String {
         val encoded = Base64.getEncoder().encodeToString(image.bytes)
