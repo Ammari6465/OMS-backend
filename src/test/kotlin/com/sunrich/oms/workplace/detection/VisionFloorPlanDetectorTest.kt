@@ -7,12 +7,36 @@ import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.test.web.client.MockRestServiceServer
+import org.springframework.test.web.client.match.MockRestRequestMatchers.content
 import org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo
 import org.springframework.test.web.client.response.MockRestResponseCreators.withStatus
 import org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess
 import org.springframework.web.client.RestClient
 
 class VisionFloorPlanDetectorTest {
+
+    @Test
+    fun `runs a desk-only recovery pass when the general scan omits workstations`() {
+        val props = properties()
+        val builder = RestClient.builder()
+        val server = MockRestServiceServer.bindTo(builder).build()
+        val rooms = """[{"type":"MEETING_ROOM","bbox":[0.1,0.1,0.3,0.2]}]"""
+        val desks = """[{"type":"DESK","bbox":[0.5,0.2,0.04,0.03]},{"type":"DESK","bbox":[0.6,0.2,0.04,0.03]}]"""
+        server.expect(requestTo("https://vision.example.test/v1/chat/completions"))
+            .andRespond(withSuccess(response(rooms), MediaType.APPLICATION_JSON))
+        server.expect(requestTo("https://vision.example.test/v1/chat/completions"))
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("only for individual workstations")))
+            .andRespond(withSuccess(response(desks), MediaType.APPLICATION_JSON))
+
+        val found = VisionFloorPlanDetector(props, builder, ObjectMapper()).detect(image())
+
+        assertThat(found.map { it.type }).containsExactly(
+            DetectedObjectType.MEETING_ROOM,
+            DetectedObjectType.DESK,
+            DetectedObjectType.DESK
+        )
+        server.verify()
+    }
 
     @Test
     fun `accepts compact bounding boxes for dense floor plans`() {

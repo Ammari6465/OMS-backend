@@ -85,8 +85,10 @@ class VisionFloorPlanDetector(
         // buffers, which is fatal on a container with little headroom.
         val prepared = if (props.preprocess && !image.prepared) preprocessor.clean(image) else null
         return try {
-            val content = request(prepared?.image ?: image)
-            val candidates = parse(content).take(props.maxObjects)
+            val visionImage = prepared?.image ?: image
+            val content = request(visionImage, PROMPT)
+            val primary = parse(content).take(props.maxObjects)
+            val candidates = addMissingDesks(visionImage, primary)
             if (prepared == null || !prepared.isCropped) candidates
             else candidates.map { it.copy(polygon = prepared.toOriginal(it.polygon)) }
         } catch (ex: RestClientResponseException) {
@@ -117,10 +119,37 @@ class VisionFloorPlanDetector(
         envelope?.path("error")?.path("message")?.asText()?.takeIf { it.isNotBlank() }
     }.getOrNull() ?: "HTTP ${ex.statusCode.value()} ${ex.statusText}"
 
-    private fun request(image: PlanImage): String {
+    /**
+     * General room detection can exhaust its output budget before reaching a
+     * dense workstation field. A compact desk-only pass makes that omission
+     * recoverable without throwing away the rooms already recognised.
+     */
+    private fun addMissingDesks(
+        image: PlanImage,
+        primary: List<DetectionCandidate>
+    ): List<DetectionCandidate> {
+        if (primary.any { it.type == DetectedObjectType.DESK }) return primary
+        return try {
+            val desks = parse(request(image, DESK_ONLY_PROMPT))
+                .filter { it.type == DetectedObjectType.DESK }
+            if (desks.isNotEmpty()) {
+                log.info("Desk-only recovery found {} workstations after the general scan found none", desks.size)
+            } else {
+                log.warn("Desk-only recovery found no workstations")
+            }
+            (primary + desks).take(props.maxObjects)
+        } catch (ex: Exception) {
+            // Partial success is valuable: a provider spike during the recovery
+            // pass must not discard rooms returned by the first request.
+            log.warn("Desk-only recovery failed; keeping {} general detections: {}", primary.size, ex.message)
+            primary
+        }
+    }
+
+    private fun request(image: PlanImage, prompt: String): String {
         val encoded = Base64.getEncoder().encodeToString(image.bytes)
         val anthropic = props.apiStyle.equals("anthropic", ignoreCase = true)
-        val body = if (anthropic) anthropicBody(encoded, image.mediaType) else openAiBody(encoded, image.mediaType)
+        val body = if (anthropic) anthropicBody(encoded, image.mediaType, prompt) else openAiBody(encoded, image.mediaType, prompt)
         val spec = client.post()
             .uri(if (anthropic) "/messages" else "/chat/completions")
             .contentType(MediaType.APPLICATION_JSON)
@@ -138,7 +167,7 @@ class VisionFloorPlanDetector(
         } ?: throw IllegalStateException("Vision model returned no text content")
     }
 
-    private fun anthropicBody(encoded: String, mediaType: String) = mapOf(
+    private fun anthropicBody(encoded: String, mediaType: String, prompt: String) = mapOf(
         "model" to props.model,
         "max_tokens" to props.maxTokens,
         "messages" to listOf(
@@ -149,20 +178,20 @@ class VisionFloorPlanDetector(
                         "type" to "image",
                         "source" to mapOf("type" to "base64", "media_type" to mediaType, "data" to encoded)
                     ),
-                    mapOf("type" to "text", "text" to PROMPT)
+                    mapOf("type" to "text", "text" to prompt)
                 )
             )
         )
     )
 
-    private fun openAiBody(encoded: String, mediaType: String) = mapOf(
+    private fun openAiBody(encoded: String, mediaType: String, prompt: String) = mapOf(
         "model" to props.model,
         "max_tokens" to props.maxTokens,
         "messages" to listOf(
             mapOf(
                 "role" to "user",
                 "content" to listOf(
-                    mapOf("type" to "text", "text" to PROMPT),
+                    mapOf("type" to "text", "text" to prompt),
                     mapOf(
                         "type" to "image_url",
                         "image_url" to mapOf("url" to "data:$mediaType;base64,$encoded")
@@ -365,6 +394,20 @@ class VisionFloorPlanDetector(
             - Report only what you can actually see. Omit a region rather than
               guessing at one; a person will add anything you miss.
             - No commentary, no markdown, JSON array only.
+        """.trimIndent()
+
+        val DESK_ONLY_PROMPT = """
+            Analyse this office floor plan only for individual workstations.
+            Return ONLY a compact JSON array. Every element must be:
+            {"type":"DESK","bbox":[x,y,width,height],"rotation":0,"confidence":0.0}
+
+            Coordinates are fractions from 0 to 1. Emit one DESK for every
+            individual chair position, including each seat in bench rows,
+            back-to-back workstation blocks, cubicles, private offices, and
+            reception counters. Never merge a row, table, or workstation block
+            into one box. Do not return rooms, meeting tables, chairs without a
+            work surface, doors, walkways, or zones. Keep the JSON compact so
+            dense plans with many desks fit in the response.
         """.trimIndent()
     }
 }
