@@ -46,8 +46,13 @@ class WorkplaceService(
  @Transactional fun batch(floorId:Long,r:DeskBatchRequest):List<DeskResponse>{ownedFloor(floorId);val existing=desks.findAllByFloor_IdAndIsDeletedFalseOrderByCode(floorId).associateBy{it.code.uppercase()};r.removedDeskIds.distinct().forEach{archiveDesk(ownedDesk(it).also{d->if(d.floor.id!=floorId)cross()})};r.desks.forEach{if(it.floorId!=floorId)throw BadRequestException("All desks must belong to the selected floor")};r.desks.forEach{req->val match=existing[req.code.trim().uppercase()];if(match==null)createDesk(req) else updateDesk(match.id!!,req.copy(version=match.version))};val saved=desks.findByFloor(floorId,flags(false));val ctx=assignmentContext(saved);return saved.map{desk(it,ctx)}}
 
 /** Desk codes already taken on a floor, for callers that must avoid a clash rather than recover from one: a duplicate raised mid-transaction cannot be caught and walked past. */
- fun deskCodes(floorId:Long):Set<String> = desks.findAllByFloor_IdAndIsDeletedFalseOrderByCode(floorId).map{it.code.uppercase()}.toSet()
- fun zoneCodes(floorId:Long):Set<String> = zones.findAllByFloor_IdAndIsDeletedFalseOrderByName(floorId).map{it.code.uppercase()}.toSet()
+ // Include soft-deleted rows: the unique index uq_workplace_{desk,zone}_floor_code
+ // spans (floor_id, code) with no is_deleted term, so a deleted record still
+ // holds its code. A caller reserving codes to avoid a clash must see those too,
+ // or it reuses a code the database still rejects — which, mid-transaction,
+ // poisons the whole batch.
+ fun deskCodes(floorId:Long):Set<String> = desks.findByFloor(floorId,flags(true)).map{it.code.uppercase()}.toSet()
+ fun zoneCodes(floorId:Long):Set<String> = zones.findByFloor(floorId,flags(true)).map{it.code.uppercase()}.toSet()
  fun map(floorId:Long):FloorMapResponse{val f=readableFloor(floorId);val list=desks.findByFloor(floorId,flags(false));val ctx=assignmentContext(list);return FloorMapResponse(floor(f),f.planStorageRef?.let{"/workplaces/floors/$floorId/plan"},zones.findAllByFloor_IdAndIsDeletedFalseOrderByName(floorId).map(::zone),list.map{desk(it,ctx)})}
  @Transactional fun uploadPlan(floorId:Long,file:MultipartFile):FloorResponse{val f=ownedFloor(floorId);val old=f.planStorageRef;val saved=storage.store(file);managePlanFiles(saved.reference,old);f.planStorageRef=saved.reference;f.planOriginalName=saved.originalName;f.planMediaType=saved.mediaType;f.planWidth=saved.width;f.planHeight=saved.height;val out=floors.saveAndFlush(f);record(company(f),"Floor",floorId,AuditAction.UPDATE,old?.let{"plan=present"},"plan=${saved.mediaType},name=${saved.originalName}");notifyActor(NotificationType.FLOOR_PLAN_REPLACED,"Floor plan updated for ${f.name}","/workplaces/floors/$floorId/map",floorId);return floor(out)}
  fun plan(floorId:Long):Triple<ByteArray,String,String>{val f=readableFloor(floorId);val ref=f.planStorageRef?:throw ResourceNotFoundException("Floor plan");return Triple(storage.read(ref),f.planMediaType?:"application/octet-stream",f.planOriginalName?:"floor-plan")}

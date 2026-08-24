@@ -261,6 +261,33 @@ class FloorPlanDetectionIntegrationTest {
         assertThat(workplace.listZones(floorId, false)).hasSize(3)
     }
 
+    /**
+     * The production 500. The unique index on (floor_id, code) ignores
+     * is_deleted, so a room the user created and then deleted still holds its
+     * code in the index. Promotion reused that code, the database rejected the
+     * insert, and inside the shared transaction the first rejection poisoned
+     * the batch — every following room failed with "null id in Zone entry" and
+     * the whole call 500'd. Reserving codes against deleted rows too keeps
+     * promotion from reaching for a code the database will not accept.
+     */
+    @Test
+    fun `promoting rooms works even when the clashing code belongs to a deleted zone`() {
+        val zone = workplace.createZone(ZoneRequest(floorId, "Old Cabin", "C1"))
+        workplace.archive("zones", zone.id) // soft-deleted: row stays, code still indexed
+        StubDetector.candidates = listOf(
+            room(DetectedObjectType.CABIN, "Cabin One"),
+            room(DetectedObjectType.CABIN, "Cabin Two")
+        )
+        service.detect(floorId)
+
+        val result = service.promoteRooms(floorId)
+
+        assertThat(result.created).isEqualTo(2)
+        assertThat(result.skipped).isZero()
+        // The live zones exclude the archived one.
+        assertThat(workplace.listZones(floorId, false)).hasSize(2)
+    }
+
     @Test
     fun `detected desks are promoted into real desks once`() {
         StubDetector.candidates = listOf(desk(0.1, 0.1), desk(0.3, 0.1))
