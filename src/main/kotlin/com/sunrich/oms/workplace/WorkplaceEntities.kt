@@ -12,6 +12,20 @@ import java.time.LocalDate
 enum class DeskMode { ASSIGNED, RESERVABLE, DROP_IN, UNAVAILABLE }
 enum class DeskAvailability { AVAILABLE, ASSIGNED, RESERVED, CHECKED_IN, UNAVAILABLE }
 
+/**
+ * The kind of physical space a [WorkplaceSpace] represents. Unlike a [Zone]
+ * (a colour-coded grouping with no shape of its own), a space carries a
+ * permanent type and geometry, so a cabin stays a cabin and keeps its outline
+ * after recognition overlays are cleared.
+ */
+enum class SpaceType {
+    CABIN, CONFERENCE_ROOM, MEETING_ROOM, RECEPTION, PANTRY, WASHROOM, SERVER_ROOM, STORAGE,
+    OPEN_WORKSPACE, WALKWAY, DOOR, STAIRCASE, ELEVATOR, EMERGENCY_EXIT;
+
+    /** Rooms people book or occupy; the rest are circulation/structure shown for context. */
+    val bookableByDefault: Boolean get() = this in setOf(CONFERENCE_ROOM, MEETING_ROOM)
+}
+
 @Entity @Table(name="workplace_offices", uniqueConstraints=[UniqueConstraint(name="uq_workplace_office_company_code",columnNames=["company_id","office_code"])], indexes=[Index(name="idx_workplace_office_company",columnList="company_id,is_deleted")])
 class Office(
  @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(name="company_id",nullable=false) var company:Company,
@@ -37,6 +51,9 @@ class Floor(
  @Column(nullable=false,length=200) var name:String,@Column(name="display_order",nullable=false) var displayOrder:Int=0,
  @Column(name="plan_storage_ref",length=255) var planStorageRef:String?=null,@Column(name="plan_original_name",length=255) var planOriginalName:String?=null,
  @Column(name="plan_media_type",length=100) var planMediaType:String?=null,@Column(name="plan_width") var planWidth:Int?=null,@Column(name="plan_height") var planHeight:Int?=null,
+ // Optimistic lock for the whole floor map (desks, zones, rooms, detected objects, plan).
+ // Bumped on every map-affecting change; a batch map save must present the value it started from.
+ @Column(name="map_revision",nullable=false) var mapRevision:Long=0,
  @Enumerated(EnumType.STRING) @Column(nullable=false,length=20) var status:EntityStatus=EntityStatus.ACTIVE
 ):BaseEntity(){@Id @GeneratedValue(strategy=GenerationType.IDENTITY) @Column(name="floor_id") var id:Long?=null}
 
@@ -48,10 +65,42 @@ class Zone(
  @Enumerated(EnumType.STRING) @Column(nullable=false,length=20) var status:EntityStatus=EntityStatus.ACTIVE
 ):BaseEntity(){@Id @GeneratedValue(strategy=GenerationType.IDENTITY) @Column(name="zone_id") var id:Long?=null}
 
-@Entity @Table(name="workplace_desks",uniqueConstraints=[UniqueConstraint(name="uq_workplace_desk_floor_code",columnNames=["floor_id","desk_code"])],indexes=[Index(name="idx_workplace_desk_floor",columnList="floor_id,is_deleted"),Index(name="idx_workplace_desk_zone",columnList="zone_id")])
+/**
+ * A typed physical space on a floor — a cabin, meeting room, washroom, reception,
+ * walkway, and so on. Unlike a [Zone], a space stores its own [type] and geometry
+ * (polygon + bounding box, normalised to 0..1 like a detected object), so a room's
+ * kind and outline survive after recognition overlays are cleared. Optionally
+ * grouped under a [zone], can be marked bookable, and can hold desks (Desk.space).
+ */
+@Entity @Table(name="workplace_spaces",uniqueConstraints=[UniqueConstraint(name="uq_workplace_space_floor_code",columnNames=["floor_id","space_code"])],indexes=[Index(name="idx_workplace_space_floor",columnList="floor_id,is_deleted"),Index(name="idx_workplace_space_zone",columnList="zone_id")])
+class WorkplaceSpace(
+ @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(name="floor_id",nullable=false) var floor:Floor,
+ @ManyToOne(fetch=FetchType.LAZY) @JoinColumn(name="zone_id") var zone:Zone?=null,
+ @Enumerated(EnumType.STRING) @Column(name="space_type",nullable=false,length=30) var type:SpaceType,
+ @Column(nullable=false,length=200) var name:String,
+ @Column(name="space_code",nullable=false,length=50) var code:String,
+ /** Polygon boundary as normalised "x,y x,y ..." pairs (0..1 on both axes). */
+ @Column(name="polygon",length=4000) var polygon:String?=null,
+ @Column(name="bbox_x",nullable=false) var bboxX:Double=0.0,@Column(name="bbox_y",nullable=false) var bboxY:Double=0.0,
+ @Column(name="bbox_width",nullable=false) var bboxWidth:Double=0.0,@Column(name="bbox_height",nullable=false) var bboxHeight:Double=0.0,
+ @Column(nullable=false) var rotation:Int=0,
+ @Column var capacity:Int?=null,
+ @Column(name="display_colour",nullable=false,length=20) var colour:String="#64748b",
+ @Column(nullable=false) var bookable:Boolean=false,
+ @Column(name="is_accessible",nullable=false) var accessible:Boolean=false,
+ /** Owning department, stored as an id (resolved on read) so the space domain stays decoupled from organization. */
+ @Column(name="department_id") var departmentId:Long?=null,
+ @Column(length=1000) var amenities:String?=null,
+ @Column(name="equipment_tags",length=1000) var equipmentTags:String?=null,
+ @Column(length=2000) var notes:String?=null,
+ @Enumerated(EnumType.STRING) @Column(nullable=false,length=20) var status:EntityStatus=EntityStatus.ACTIVE
+):BaseEntity(){@Id @GeneratedValue(strategy=GenerationType.IDENTITY) @Column(name="space_id") var id:Long?=null}
+
+@Entity @Table(name="workplace_desks",uniqueConstraints=[UniqueConstraint(name="uq_workplace_desk_floor_code",columnNames=["floor_id","desk_code"])],indexes=[Index(name="idx_workplace_desk_floor",columnList="floor_id,is_deleted"),Index(name="idx_workplace_desk_zone",columnList="zone_id"),Index(name="idx_workplace_desk_space",columnList="space_id")])
 class Desk(
  @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(name="floor_id",nullable=false) var floor:Floor,
  @ManyToOne(fetch=FetchType.LAZY) @JoinColumn(name="zone_id") var zone:Zone?=null,
+ @ManyToOne(fetch=FetchType.LAZY) @JoinColumn(name="space_id") var space:WorkplaceSpace?=null,
  @Column(name="desk_code",nullable=false,length=80) var code:String,@Column(name="display_name",length=200) var displayName:String?=null,
  @Enumerated(EnumType.STRING) @Column(nullable=false,length=20) var mode:DeskMode=DeskMode.ASSIGNED,
  @Enumerated(EnumType.STRING) @Column(nullable=false,length=20) var availability:DeskAvailability=DeskAvailability.AVAILABLE,

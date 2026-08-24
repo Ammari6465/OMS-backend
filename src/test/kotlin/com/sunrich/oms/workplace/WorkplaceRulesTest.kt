@@ -7,6 +7,9 @@ import com.sunrich.oms.security.UserPrincipal
 import com.sunrich.oms.systemdata.AuditLogRepository
 import com.sunrich.oms.systemdata.NotificationRepository
 import com.sunrich.oms.user.*
+import com.sunrich.oms.workplace.detection.DetectedObject
+import com.sunrich.oms.workplace.detection.DetectedObjectRepository
+import com.sunrich.oms.workplace.detection.DetectedObjectType
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
 import org.springframework.beans.factory.annotation.Autowired
@@ -36,6 +39,8 @@ class WorkplaceRulesTest{
  @Autowired lateinit var notifications:NotificationRepository
  @Autowired lateinit var desks:DeskRepository
  @Autowired lateinit var assignments:DeskAssignmentRepository
+ @Autowired lateinit var floors:FloorRepository
+ @Autowired lateinit var detectedObjects:DetectedObjectRepository
  @Autowired lateinit var clock:Clock
 
  lateinit var admin:User
@@ -90,31 +95,189 @@ class WorkplaceRulesTest{
   assertThat(service.searchFloor(floor,"nothing-matches-this")).isEmpty()
  }
 
- // ---- batch save and removal -------------------------------------------------------------------
- @Test fun `batch save moves desks and archives the ones the editor removed`(){
-  val moved=DeskRequest(floor,code="F3-027",x=BigDecimal("40"),y=BigDecimal("40"),width=BigDecimal("4"),height=BigDecimal("3"))
-  val saved=service.batch(floor,DeskBatchRequest(listOf(moved),removedDeskIds=listOf(desk2)))
+ // ---- batch save and removal (ID-based matching) -------------------------------------------------
+ @Test fun `batch save moves desks by id and archives the ones the editor removed`(){
+  val saved=service.batch(floor,DeskBatchRequest(listOf(item(desk,"F3-027",40,40,zone)),removedDeskIds=listOf(desk2),mapRevision=mapRevision()))
   assertThat(saved.map{it.code}).containsExactly("F3-027")
+  assertThat(saved.first().id).isEqualTo(desk)
   assertThat(saved.first().x).isEqualByComparingTo(BigDecimal("40"))
   assertThat(desks.findById(desk2).orElseThrow().isDeleted).isTrue()
  }
 
- @Test fun `batch rejects desks belonging to another floor`(){
+ @Test fun `renaming a desk updates the same row instead of creating a second desk`(){
+  val saved=service.batch(floor,DeskBatchRequest(listOf(item(desk,"F3-999",10,10,zone),item(desk2,"F3-028",20,10)),mapRevision=mapRevision()))
+  // The renamed desk keeps its id; no third desk is created.
+  assertThat(desks.findById(desk).orElseThrow().code).isEqualTo("F3-999")
+  assertThat(saved.first{it.code=="F3-999"}.id).isEqualTo(desk)
+  assertThat(desks.findAllByFloor_IdAndIsDeletedFalseOrderByCode(floor).map{it.id}).containsExactlyInAnyOrder(desk,desk2)
+ }
+
+ @Test fun `batch rejects a new desk belonging to another floor`(){
   val otherFloor=service.createFloor(FloorRequest(building,"Floor 4",4)).id
-  val stray=DeskRequest(otherFloor,code="F4-001",x=BigDecimal("5"),y=BigDecimal("5"),width=BigDecimal("4"),height=BigDecimal("3"))
-  assertThatThrownBy{service.batch(floor,DeskBatchRequest(listOf(stray)))}.isInstanceOf(BadRequestException::class.java)
+  val stray=DeskBatchItem(floorId=otherFloor,code="F4-001",x=BigDecimal("5"),y=BigDecimal("5"),width=BigDecimal("4"),height=BigDecimal("3"))
+  assertThatThrownBy{service.batch(floor,DeskBatchRequest(listOf(stray),mapRevision=mapRevision()))}.isInstanceOf(BadRequestException::class.java)
+ }
+
+ @Test fun `batch cannot modify a desk that lives on another floor`(){
+  val otherFloor=service.createFloor(FloorRequest(building,"Floor 5",5)).id
+  val stray=service.createDesk(DeskRequest(otherFloor,code="F5-001",x=BigDecimal("5"),y=BigDecimal("5"),width=BigDecimal("4"),height=BigDecimal("3")))
+  // Referenced by id but claiming this floor: rejected because the row lives elsewhere.
+  val forged=DeskBatchItem(id=stray.id,version=stray.version,floorId=floor,code="F5-001",x=BigDecimal("6"),y=BigDecimal("6"),width=BigDecimal("4"),height=BigDecimal("3"))
+  assertThatThrownBy{service.batch(floor,DeskBatchRequest(listOf(forged),mapRevision=mapRevision()))}.isInstanceOf(BadRequestException::class.java)
+  assertThat(desks.findById(stray.id).orElseThrow().code).isEqualTo("F5-001")
+ }
+
+ @Test fun `batch rejects duplicate desk codes in the same request`(){
+  val a=DeskBatchItem(floorId=floor,code="DUP",x=BigDecimal("30"),y=BigDecimal("30"),width=BigDecimal("4"),height=BigDecimal("3"))
+  val b=DeskBatchItem(floorId=floor,code="dup",x=BigDecimal("35"),y=BigDecimal("35"),width=BigDecimal("4"),height=BigDecimal("3"))
+  assertThatThrownBy{service.batch(floor,DeskBatchRequest(listOf(a,b),mapRevision=mapRevision()))}.isInstanceOf(ConflictException::class.java)
+ }
+
+ @Test fun `a desk cannot be updated and removed in the same request`(){
+  assertThatThrownBy{service.batch(floor,DeskBatchRequest(listOf(item(desk,"F3-027",40,40,zone)),removedDeskIds=listOf(desk),mapRevision=mapRevision()))}
+   .isInstanceOf(BadRequestException::class.java)
+ }
+
+ @Test fun `a stale map revision is rejected`(){
+  val stale=mapRevision()
+  service.createDesk(deskRequest("F3-100",60,10))            // another admin changes the map
+  assertThatThrownBy{service.batch(floor,DeskBatchRequest(listOf(item(desk,"F3-027",40,40,zone)),mapRevision=stale))}
+   .isInstanceOf(ConflictException::class.java).hasMessageContaining("changed")
+ }
+
+ @Test fun `a stale desk version inside a batch is rejected with 409`(){
+  val staleVersion=service.getDesk(desk).version
+  service.updateDesk(desk,DeskRequest(floor,zoneId=zone,code="F3-027",x=BigDecimal("11"),y=BigDecimal("11"),width=BigDecimal("4"),height=BigDecimal("3"),version=staleVersion))
+  // Fresh map revision isolates the desk-version check from the map-revision check.
+  assertThatThrownBy{service.batch(floor,DeskBatchRequest(listOf(item(desk,"F3-027",40,40,zone,staleVersion)),mapRevision=mapRevision()))}
+   .isInstanceOf(ConflictException::class.java)
+ }
+
+ @Test fun `batch requires the map revision`(){
+  assertThatThrownBy{service.batch(floor,DeskBatchRequest(listOf(item(desk,"F3-027",40,40,zone)),mapRevision=null))}
+   .isInstanceOf(BadRequestException::class.java)
  }
 
  @Test fun `batch recreates an archived desk code instead of violating the database constraint`(){
   service.archive("desks",desk2)
-  val recreated=deskRequest("F3-028",55,30)
-
-  val saved=service.batch(floor,DeskBatchRequest(listOf(deskRequest("F3-027",10,10,zone),recreated)))
-
+  val saved=service.batch(floor,DeskBatchRequest(listOf(item(desk,"F3-027",10,10,zone),DeskBatchItem(floorId=floor,code="F3-028",x=BigDecimal("55"),y=BigDecimal("30"),width=BigDecimal("4"),height=BigDecimal("3"))),mapRevision=mapRevision()))
   assertThat(saved.map{it.code}).containsExactly("F3-027","F3-028")
-  assertThat(saved.first{it.code=="F3-028"}.id).isEqualTo(desk2)
+  assertThat(saved.first{it.code=="F3-028"}.id).isEqualTo(desk2)     // restored the same row
   assertThat(saved.first{it.code=="F3-028"}.x).isEqualByComparingTo(BigDecimal("55"))
   assertThat(desks.findById(desk2).orElseThrow().isDeleted).isFalse()
+ }
+
+ // ---- date-aware availability (assignment expiry) ------------------------------------------------
+ @Test fun `a naturally expired assignment frees the desk`(){
+  val today=LocalDate.now(clock)
+  service.assign(AssignmentRequest(desk,staffId,today.minusDays(10),effectiveTo=today.minusDays(1),reason="Temporary"))
+  assertThat(service.getDesk(desk).availability).isEqualTo(DeskAvailability.AVAILABLE)
+  assertThat(service.currentForStaff(staffId)).isNull()
+  assertThat(service.map(floor).desks.first{it.id==desk}.availability).isEqualTo(DeskAvailability.AVAILABLE)
+ }
+
+ @Test fun `a future assignment does not occupy the desk today but is visible in history`(){
+  val today=LocalDate.now(clock)
+  val a=service.assign(AssignmentRequest(desk,staffId,today.plusDays(7),reason="Joiner"))
+  assertThat(service.getDesk(desk).availability).isEqualTo(DeskAvailability.AVAILABLE)
+  assertThat(service.currentForStaff(staffId)).isNull()
+  assertThat(service.history(staffId).map{it.id}).contains(a.id)
+ }
+
+ @Test fun `same-day start and release leaves the desk available and keeps history`(){
+  val today=LocalDate.now(clock)
+  val a=service.assign(AssignmentRequest(desk,staffId,today,reason="Day desk"))
+  service.release(a.id,ReleaseRequest(today,"Released same day",a.version))
+  assertThat(service.getDesk(desk).availability).isEqualTo(DeskAvailability.AVAILABLE)
+  assertThat(service.history(staffId)).isNotEmpty
+ }
+
+ @Test fun `the legacy Asia Calcutta time zone is stored as Asia Kolkata`(){
+  val tz=service.createOffice(OfficeRequest(company,"TZ Office","TZ-${System.nanoTime()}",timeZone="Asia/Calcutta")).timeZone
+  assertThat(tz).isEqualTo("Asia/Kolkata")
+ }
+
+ // ---- detected-object promotion links (soft-delete unlinking) ------------------------------------
+ @Test fun `archiving a promoted desk unlinks its detected object so it can be promoted again`(){
+  val promoted=service.createDesk(deskRequest("PROMO",30,30)).id
+  val obj=detectedObjects.save(DetectedObject(floor=floors.findById(floor).orElseThrow(),type=DetectedObjectType.DESK,polygon="0,0 0.1,0 0.1,0.1 0,0.1",deskId=promoted))
+  service.archive("desks",promoted)
+  assertThat(detectedObjects.findById(obj.id!!).orElseThrow().deskId).isNull()
+ }
+
+ @Test fun `archiving a promoted zone unlinks its detected object and unzones its desks`(){
+  val promoted=service.createZone(ZoneRequest(floor,"Promoted Cabin","CAB1","#8b5cf6")).id
+  service.updateDesk(desk,DeskRequest(floor,zoneId=promoted,code="F3-027",x=BigDecimal("10"),y=BigDecimal("10"),width=BigDecimal("4"),height=BigDecimal("3"),version=service.getDesk(desk).version))
+  val obj=detectedObjects.save(DetectedObject(floor=floors.findById(floor).orElseThrow(),type=DetectedObjectType.CABIN,polygon="0,0 0.2,0 0.2,0.2 0,0.2",zoneId=promoted))
+  service.archive("zones",promoted)
+  assertThat(detectedObjects.findById(obj.id!!).orElseThrow().zoneId).isNull()
+  assertThat(desks.findById(desk).orElseThrow().zone).isNull()
+ }
+
+ // ---- archive / restore hierarchy ----------------------------------------------------------------
+ @Test fun `a floor cannot be archived while zones or desks remain`(){
+  assertThatThrownBy{service.archive("floors",floor)}.isInstanceOf(ConflictException::class.java)
+ }
+
+ @Test fun `a child cannot be restored while its parent is archived`(){
+  val emptyFloor=service.createFloor(FloorRequest(building,"Spare",9)).id
+  val d=service.createDesk(DeskRequest(emptyFloor,code="E-1",x=BigDecimal("5"),y=BigDecimal("5"),width=BigDecimal("4"),height=BigDecimal("3"))).id
+  service.archive("desks",d)
+  service.archive("floors",emptyFloor)
+  assertThatThrownBy{service.restore("desks",d)}.isInstanceOf(ConflictException::class.java)
+  service.restore("floors",emptyFloor)
+  service.restore("desks",d)
+  assertThat(desks.findById(d).orElseThrow().isDeleted).isFalse()
+ }
+
+ // ---- workplace spaces (Phase 2: typed rooms with permanent geometry) ----------------------------
+ @Test fun `a space stores its type and geometry and can be edited without losing either`(){
+  val s=service.createSpace(spaceRequest("Director Cabin","CAB-1",SpaceType.CABIN))
+  assertThat(s.type).isEqualTo(SpaceType.CABIN)
+  assertThat(s.polygon).isNotEmpty()
+  assertThat(s.bbox.width).isGreaterThan(0.0)
+  val updated=service.updateSpace(s.id,SpaceRequest(floorId=floor,type=SpaceType.CONFERENCE_ROOM,name="Board Room",code="CAB-1",colour="#0ea5e9",capacity=8,amenities="TV, whiteboard",bookable=true,version=s.version))
+  assertThat(updated.type).isEqualTo(SpaceType.CONFERENCE_ROOM)
+  assertThat(updated.name).isEqualTo("Board Room")
+  assertThat(updated.capacity).isEqualTo(8)
+  assertThat(updated.amenities).isEqualTo("TV, whiteboard")
+  assertThat(updated.colour).isEqualTo("#0ea5e9")
+  assertThat(updated.bookable).isTrue()
+  // Geometry survives an edit that does not resend the polygon.
+  assertThat(updated.polygon).isNotEmpty()
+ }
+
+ @Test fun `desks can be assigned to a space and the space reports its desk count`(){
+  val s=service.createSpace(spaceRequest("Cabin","CAB-1"))
+  service.updateDesk(desk,DeskRequest(floor,zoneId=zone,spaceId=s.id,code="F3-027",x=BigDecimal("10"),y=BigDecimal("10"),width=BigDecimal("4"),height=BigDecimal("3"),version=service.getDesk(desk).version))
+  assertThat(service.getDesk(desk).spaceId).isEqualTo(s.id)
+  assertThat(service.getSpace(s.id).deskCount).isEqualTo(1)
+  assertThat(service.map(floor).spaces.first{it.id==s.id}.deskCount).isEqualTo(1)
+ }
+
+ @Test fun `archiving a space unassigns its desks and unlinks its detected objects`(){
+  val s=service.createSpace(spaceRequest("Cabin","CAB-1"))
+  service.updateDesk(desk,DeskRequest(floor,spaceId=s.id,code="F3-027",x=BigDecimal("10"),y=BigDecimal("10"),width=BigDecimal("4"),height=BigDecimal("3"),version=service.getDesk(desk).version))
+  val obj=detectedObjects.save(DetectedObject(floor=floors.findById(floor).orElseThrow(),type=DetectedObjectType.CABIN,polygon="0,0 0.2,0 0.2,0.2 0,0.2",spaceId=s.id))
+  service.archive("spaces",s.id)
+  assertThat(desks.findById(desk).orElseThrow().space).isNull()
+  assertThat(detectedObjects.findById(obj.id!!).orElseThrow().spaceId).isNull()
+ }
+
+ @Test fun `space codes are unique per floor`(){
+  service.createSpace(spaceRequest("Cabin","CAB-1"))
+  assertThatThrownBy{service.createSpace(spaceRequest("Another","CAB-1"))}.isInstanceOf(ConflictException::class.java)
+ }
+
+ @Test fun `a space rejects a non-existent department and an out-of-range polygon`(){
+  assertThatThrownBy{service.createSpace(spaceRequest("Cabin","CAB-1").copy(departmentId=999999))}.isInstanceOf(ResourceNotFoundException::class.java)
+  assertThatThrownBy{service.createSpace(spaceRequest("Cabin","CAB-2",polygon="0.1,0.1 2.0,0.1 0.3,0.3"))}.isInstanceOf(BadRequestException::class.java)
+ }
+
+ @Test fun `a floor cannot be archived while spaces remain`(){
+  val f2=service.createFloor(FloorRequest(building,"Spaces Floor",8)).id
+  service.createSpace(SpaceRequest(floorId=f2,type=SpaceType.WASHROOM,name="Washroom",code="WC-1"))
+  assertThatThrownBy{service.archive("floors",f2)}.isInstanceOf(ConflictException::class.java).hasMessageContaining("spaces")
  }
 
  @Test fun `clearing floor contents removes desks zones and all their assignments`(){
@@ -250,6 +413,15 @@ class WorkplaceRulesTest{
 
  private fun deskRequest(code:String,x:Int,y:Int,zoneId:Long?=null)=
   DeskRequest(floor,zoneId=zoneId,code=code,x=BigDecimal(x),y=BigDecimal(y),width=BigDecimal("4"),height=BigDecimal("3"))
+
+ private fun spaceRequest(name:String,code:String,type:SpaceType=SpaceType.CABIN,polygon:String?="0.1,0.1 0.3,0.1 0.3,0.3 0.1,0.3")=
+  SpaceRequest(floorId=floor,type=type,name=name,code=code,polygon=polygon)
+
+ /** The current floor-map revision, which a batch save must present. */
+ private fun mapRevision()=service.map(floor).floor.mapRevision
+ /** A batch item for an existing desk (id given, version read from the DB) or a new one (id null). */
+ private fun item(id:Long?,code:String,x:Int,y:Int,zoneId:Long?=null,version:Long?=id?.let{service.getDesk(it).version})=
+  DeskBatchItem(id=id,version=version,floorId=floor,zoneId=zoneId,code=code,x=BigDecimal(x),y=BigDecimal(y),width=BigDecimal("4"),height=BigDecimal("3"))
 
  /** A genuinely encoded 8x6 PNG, so the upload path decodes real image dimensions. */
  private fun pngBytes():ByteArray{val out=java.io.ByteArrayOutputStream();javax.imageio.ImageIO.write(java.awt.image.BufferedImage(8,6,java.awt.image.BufferedImage.TYPE_INT_RGB),"png",out);return out.toByteArray()}

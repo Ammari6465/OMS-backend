@@ -4,8 +4,9 @@ import com.sunrich.oms.common.enums.AuditAction
 import com.sunrich.oms.exception.BadRequestException
 import com.sunrich.oms.exception.ResourceNotFoundException
 import com.sunrich.oms.workplace.DeskRequest
+import com.sunrich.oms.workplace.SpaceRequest
+import com.sunrich.oms.workplace.SpaceType
 import com.sunrich.oms.workplace.WorkplaceService
-import com.sunrich.oms.workplace.ZoneRequest
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -116,6 +117,7 @@ class FloorPlanDetectionService(
             ).apply { applyGeometry(this, candidate.polygon) }
         })
         workplace.recordFloorAudit(floorId, AuditAction.UPDATE, "detected=${saved.size},detector=${detector.name}")
+        workplace.bumpFloorMapRevision(floorId)
         log.info("Detected {} objects on floor {} using {}", saved.size, floorId, detector.name)
         return DetectionRunResponse(
             floorId = floorId,
@@ -139,6 +141,7 @@ class FloorPlanDetectionService(
         existing.forEach { it.markDeleted() }
         objects.saveAll(existing)
         workplace.recordFloorAudit(floorId, AuditAction.UPDATE, "detectedObjectsCleared=${existing.size}")
+        workplace.bumpFloorMapRevision(floorId)
         return existing.size
     }
 
@@ -179,6 +182,7 @@ class FloorPlanDetectionService(
         workplace.recordFloorAudit(
             floorId, AuditAction.UPDATE, "edited=${saved.size},removed=${request.removedIds.size}"
         )
+        workplace.bumpFloorMapRevision(floorId)
         return objects.findAllByFloor_IdAndIsDeletedFalseOrderByIdAsc(floorId).map(::response)
     }
 
@@ -229,22 +233,30 @@ class FloorPlanDetectionService(
     fun promoteRooms(floorId: Long): RoomPromotionResponse {
         workplace.requireManageableFloor(floorId)
         val candidates = objects.findAllByFloor_IdAndIsDeletedFalseOrderByIdAsc(floorId)
-            .filter { it.type in ROOM_TYPES && it.zoneId == null }
+            .filter { it.type in ROOM_TYPES && it.spaceId == null }
         val created = mutableListOf<Long>()
         var skipped = 0
-        val taken = workplace.zoneCodes(floorId).toMutableSet()
+        val taken = workplace.spaceCodes(floorId).toMutableSet()
         candidates.forEach { detected ->
             val name = detected.name?.trim()?.takeIf { it.isNotEmpty() }
                 ?: "${label(detected.type)} ${created.size + skipped + 1}"
             val code = uniqueCode(detected.code ?: prefix(detected.type), taken)
             taken += code.uppercase()
             try {
-                val zone = workplace.createZone(
-                    ZoneRequest(floorId = floorId, name = name, code = code, colour = colour(detected.type))
+                // A promoted room becomes a typed WorkplaceSpace that keeps its
+                // type and its detected geometry, instead of a generic zone that
+                // discarded both.
+                val type = spaceType(detected.type)
+                val space = workplace.createSpaceForPromotion(
+                    SpaceRequest(
+                        floorId = floorId, type = type, name = name, code = code,
+                        colour = colour(detected.type), polygon = detected.polygon,
+                        rotation = detected.rotation, bookable = type.bookableByDefault
+                    )
                 )
-                detected.zoneId = zone.id
+                detected.spaceId = space.id
                 objects.save(detected)
-                created += zone.id
+                created += space.id
             } catch (ex: Exception) {
                 // Reserving codes up front makes a clash unlikely, but a
                 // concurrent edit could still take one. Skip, do not abort.
@@ -253,6 +265,18 @@ class FloorPlanDetectionService(
             }
         }
         return RoomPromotionResponse(created.size, skipped, created)
+    }
+
+    private fun spaceType(t: DetectedObjectType): SpaceType = when (t) {
+        DetectedObjectType.CABIN -> SpaceType.CABIN
+        DetectedObjectType.CONFERENCE_ROOM -> SpaceType.CONFERENCE_ROOM
+        DetectedObjectType.MEETING_ROOM -> SpaceType.MEETING_ROOM
+        DetectedObjectType.RECEPTION -> SpaceType.RECEPTION
+        DetectedObjectType.PANTRY -> SpaceType.PANTRY
+        DetectedObjectType.WASHROOM -> SpaceType.WASHROOM
+        DetectedObjectType.SERVER_ROOM -> SpaceType.SERVER_ROOM
+        DetectedObjectType.STORAGE -> SpaceType.STORAGE
+        else -> SpaceType.OPEN_WORKSPACE
     }
 
     private val ROOM_TYPES = setOf(
@@ -420,7 +444,7 @@ class FloorPlanDetectionService(
         bbox = BoundingBox(e.bboxX, e.bboxY, e.bboxWidth, e.bboxHeight),
         center = Point(e.centerX, e.centerY), rotation = e.rotation, area = e.area,
         confidence = e.confidence, ocrText = e.ocrText, source = e.source,
-        detector = e.detector, deskId = e.deskId, zoneId = e.zoneId, version = e.version
+        detector = e.detector, deskId = e.deskId, zoneId = e.zoneId, spaceId = e.spaceId, version = e.version
     )
 
     private companion object {

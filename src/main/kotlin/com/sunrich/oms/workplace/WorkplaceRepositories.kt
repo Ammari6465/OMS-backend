@@ -1,10 +1,13 @@
 package com.sunrich.oms.workplace
 
+import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor
+import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import java.time.LocalDate
+import java.time.LocalTime
 
 // Hierarchy reads join fetch their owning chain so a list or map request never degrades into a
 // lazy-loading query per row, and the soft-delete filter is expressed as an `in` over the allowed
@@ -49,10 +52,26 @@ interface DeskRepository:JpaRepository<Desk,Long>,JpaSpecificationExecutor<Desk>
  fun findAllByFloor_IdAndIsDeletedFalseOrderByCode(id:Long):List<Desk>
  fun existsByFloor_IdAndIsDeletedFalse(id:Long):Boolean
  fun countByFloor_Building_Office_Company_IdInAndIsDeletedFalse(companyIds:Collection<Long>):Long
- @Query("select d from Desk d join fetch d.floor f join fetch f.building b join fetch b.office o join fetch o.company left join fetch d.zone where f.id=:floorId and d.isDeleted in :flags order by d.code") fun findByFloor(@Param("floorId")floorId:Long,@Param("flags")flags:Collection<Boolean>):List<Desk>
- @Query("select d from Desk d join fetch d.floor f join fetch f.building b join fetch b.office o join fetch o.company left join fetch d.zone where d.isDeleted in :flags order by d.code") fun findAllScoped(@Param("flags")flags:Collection<Boolean>):List<Desk>
- @Query("select d from Desk d join fetch d.floor f join fetch f.building b join fetch b.office o join fetch o.company c left join fetch d.zone where c.id in :companyIds and d.isDeleted in :flags order by d.code") fun findCompanyScoped(@Param("companyIds")companyIds:Collection<Long>,@Param("flags")flags:Collection<Boolean>):List<Desk>
+ @Query("select d from Desk d join fetch d.floor f join fetch f.building b join fetch b.office o join fetch o.company left join fetch d.zone left join fetch d.space where f.id=:floorId and d.isDeleted in :flags order by d.code") fun findByFloor(@Param("floorId")floorId:Long,@Param("flags")flags:Collection<Boolean>):List<Desk>
+ @Query("select d from Desk d join fetch d.floor f join fetch f.building b join fetch b.office o join fetch o.company left join fetch d.zone left join fetch d.space where d.isDeleted in :flags order by d.code") fun findAllScoped(@Param("flags")flags:Collection<Boolean>):List<Desk>
+ @Query("select d from Desk d join fetch d.floor f join fetch f.building b join fetch b.office o join fetch o.company c left join fetch d.zone left join fetch d.space where c.id in :companyIds and d.isDeleted in :flags order by d.code") fun findCompanyScoped(@Param("companyIds")companyIds:Collection<Long>,@Param("flags")flags:Collection<Boolean>):List<Desk>
+ /** Live desk counts per space on a floor, so the map and space list show occupancy without a query per space. */
+ @Query("select d.space.id, count(d) from Desk d where d.floor.id=:floorId and d.isDeleted=false and d.space.id is not null group by d.space.id") fun spaceDeskCounts(@Param("floorId")floorId:Long):List<Array<Any>>
+ /** Loads a desk under a pessimistic write lock so a booking's check-then-insert cannot race another. */
+ @Lock(LockModeType.PESSIMISTIC_WRITE)
+ @Query("select d from Desk d where d.id=:id and d.isDeleted=false") fun lockForBooking(@Param("id")id:Long):Desk?
  @Query("select count(d) from Desk d where d.floor.building.office.company.id in :companyIds and d.isDeleted=false and (d.mode=:mode or d.availability=:availability)") fun countUnavailable(@Param("companyIds")companyIds:Collection<Long>,@Param("mode")mode:DeskMode,@Param("availability")availability:DeskAvailability):Long
+}
+
+interface WorkplaceSpaceRepository:JpaRepository<WorkplaceSpace,Long>,JpaSpecificationExecutor<WorkplaceSpace>{
+ fun existsByFloor_IdAndCodeIgnoreCaseAndIsDeletedFalse(floorId:Long,code:String):Boolean
+ fun existsByFloor_IdAndCodeIgnoreCaseAndIdNotAndIsDeletedFalse(floorId:Long,code:String,id:Long):Boolean
+ fun findFirstByFloor_IdAndCodeIgnoreCase(floorId:Long,code:String):WorkplaceSpace?
+ fun existsByFloor_IdAndIsDeletedFalse(id:Long):Boolean
+ fun findAllByZone_IdAndIsDeletedFalse(zoneId:Long):List<WorkplaceSpace>
+ @Query("select s from WorkplaceSpace s join fetch s.floor f join fetch f.building b join fetch b.office o join fetch o.company left join fetch s.zone where f.id=:floorId and s.isDeleted in :flags order by s.name") fun findByFloor(@Param("floorId")floorId:Long,@Param("flags")flags:Collection<Boolean>):List<WorkplaceSpace>
+ @Query("select s from WorkplaceSpace s join fetch s.floor f join fetch f.building b join fetch b.office o join fetch o.company left join fetch s.zone where s.isDeleted in :flags order by s.name") fun findAllScoped(@Param("flags")flags:Collection<Boolean>):List<WorkplaceSpace>
+ @Query("select s from WorkplaceSpace s join fetch s.floor f join fetch f.building b join fetch b.office o join fetch o.company c left join fetch s.zone where c.id in :companyIds and s.isDeleted in :flags order by s.name") fun findCompanyScoped(@Param("companyIds")companyIds:Collection<Long>,@Param("flags")flags:Collection<Boolean>):List<WorkplaceSpace>
 }
 
 interface DeskAssignmentRepository:JpaRepository<DeskAssignment,Long>,JpaSpecificationExecutor<DeskAssignment>{

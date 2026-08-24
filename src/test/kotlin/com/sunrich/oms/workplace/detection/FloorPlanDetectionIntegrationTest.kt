@@ -221,7 +221,7 @@ class FloorPlanDetectionIntegrationTest {
     }
 
     @Test
-    fun `detected rooms are promoted into zones once, and a re-run adds nothing`() {
+    fun `detected rooms are promoted into typed spaces once, keeping type and geometry`() {
         StubDetector.candidates = listOf(
             room(DetectedObjectType.CABIN, "Director Cabin"),
             room(DetectedObjectType.CONFERENCE_ROOM, "Board Room")
@@ -232,11 +232,28 @@ class FloorPlanDetectionIntegrationTest {
         val second = service.promoteRooms(floorId)
 
         assertThat(first.created).isEqualTo(2)
-        // Idempotent: promoted rooms carry a zoneId and are not offered again.
+        // Idempotent: promoted rooms carry a spaceId and are not offered again.
         assertThat(second.created).isZero()
-        val zones = workplace.listZones(floorId, false)
-        assertThat(zones.map { it.name }).containsExactlyInAnyOrder("Director Cabin", "Board Room")
-        assertThat(service.list(floorId).count { it.zoneId != null }).isEqualTo(2)
+        val spaces = workplace.listSpaces(floorId, false)
+        assertThat(spaces.map { it.name }).containsExactlyInAnyOrder("Director Cabin", "Board Room")
+        // Type is preserved permanently, not re-guessed from a zone code.
+        assertThat(spaces.map { it.type }).containsExactlyInAnyOrder(SpaceType.CABIN, SpaceType.CONFERENCE_ROOM)
+        assertThat(service.list(floorId).count { it.spaceId != null }).isEqualTo(2)
+        // Geometry survives promotion, independent of the recognition overlay.
+        assertThat(spaces).allSatisfy { assertThat(it.polygon).isNotEmpty() }
+    }
+
+    @Test
+    fun `a promoted space keeps its geometry after the recognition overlay is cleared`() {
+        StubDetector.candidates = listOf(room(DetectedObjectType.CABIN, "Director Cabin"))
+        service.detect(floorId)
+        service.promoteRooms(floorId)
+        service.clear(floorId) // drop every detected overlay
+        val spaces = workplace.listSpaces(floorId, false)
+        assertThat(spaces).singleElement().satisfies({
+            assertThat(it.type).isEqualTo(SpaceType.CABIN)
+            assertThat(it.polygon).isNotEmpty()
+        })
     }
 
     /**
@@ -246,8 +263,8 @@ class FloorPlanDetectionIntegrationTest {
      * room lands.
      */
     @Test
-    fun `promoting rooms works even when a zone code already exists`() {
-        workplace.createZone(ZoneRequest(floorId, "Existing", "C1"))
+    fun `promoting rooms works even when a space code already exists`() {
+        workplace.createSpace(SpaceRequest(floorId = floorId, type = SpaceType.CABIN, name = "Existing", code = "C1"))
         StubDetector.candidates = listOf(
             room(DetectedObjectType.CABIN, "Cabin One"),
             room(DetectedObjectType.CABIN, "Cabin Two")
@@ -258,7 +275,7 @@ class FloorPlanDetectionIntegrationTest {
 
         assertThat(result.created).isEqualTo(2)
         assertThat(result.skipped).isZero()
-        assertThat(workplace.listZones(floorId, false)).hasSize(3)
+        assertThat(workplace.listSpaces(floorId, false)).hasSize(3)
     }
 
     /**
@@ -271,9 +288,9 @@ class FloorPlanDetectionIntegrationTest {
      * promotion from reaching for a code the database will not accept.
      */
     @Test
-    fun `promoting rooms works even when the clashing code belongs to a deleted zone`() {
-        val zone = workplace.createZone(ZoneRequest(floorId, "Old Cabin", "C1"))
-        workplace.archive("zones", zone.id) // soft-deleted: row stays, code still indexed
+    fun `promoting rooms works even when the clashing code belongs to a deleted space`() {
+        val space = workplace.createSpace(SpaceRequest(floorId = floorId, type = SpaceType.CABIN, name = "Old Cabin", code = "C1"))
+        workplace.archive("spaces", space.id) // soft-deleted: row stays, code still indexed
         StubDetector.candidates = listOf(
             room(DetectedObjectType.CABIN, "Cabin One"),
             room(DetectedObjectType.CABIN, "Cabin Two")
@@ -284,8 +301,8 @@ class FloorPlanDetectionIntegrationTest {
 
         assertThat(result.created).isEqualTo(2)
         assertThat(result.skipped).isZero()
-        // The live zones exclude the archived one.
-        assertThat(workplace.listZones(floorId, false)).hasSize(2)
+        // The live spaces exclude the archived one.
+        assertThat(workplace.listSpaces(floorId, false)).hasSize(2)
     }
 
     @Test

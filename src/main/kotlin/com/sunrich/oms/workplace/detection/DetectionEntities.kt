@@ -122,7 +122,13 @@ class DetectedObject(
     /** Zone created from this room detection, once promoted. Keeps a re-run
      *  from creating the same room twice. */
     @Column(name = "zone_id")
-    var zoneId: Long? = null
+    var zoneId: Long? = null,
+
+    /** Workplace space created from this room detection, once promoted. The
+     *  typed successor to [zoneId] for rooms: a promoted room becomes a
+     *  WorkplaceSpace that keeps its type and geometry. */
+    @Column(name = "space_id")
+    var spaceId: Long? = null
 ) : BaseEntity() {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

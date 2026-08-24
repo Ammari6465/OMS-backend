@@ -20,6 +20,7 @@ data class DetectedObjectResponse(
     val detector: String?,
     val deskId: Long?,
     val zoneId: Long?,
+    val spaceId: Long?,
     val version: Long
 )
 
@@ -56,8 +57,8 @@ data class DetectionRunResponse(
 /** Result of turning detected desks into real Desk records. */
 data class DeskPromotionResponse(val created: Int, val skipped: Int, val deskIds: List<Long>)
 
-/** Result of turning detected rooms into real Zone records. */
-data class RoomPromotionResponse(val created: Int, val skipped: Int, val zoneIds: List<Long>)
+/** Result of turning detected rooms into real WorkplaceSpace records. */
+data class RoomPromotionResponse(val created: Int, val skipped: Int, val spaceIds: List<Long>)
 
 /** Result of deliberately emptying every editable layer while retaining the plan image. */
 data class MapContentsClearResponse(
