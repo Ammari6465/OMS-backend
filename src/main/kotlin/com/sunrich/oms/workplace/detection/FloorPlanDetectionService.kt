@@ -193,29 +193,21 @@ class FloorPlanDetectionService(
             .filter { it.type == DetectedObjectType.DESK && it.deskId == null }
         val created = mutableListOf<Long>()
         var skipped = 0
+        // Detection restarts its row lettering every scan, so promoting onto a
+        // floor that already holds desks collides on the first candidate.
+        val taken = workplace.deskCodes(floorId).toMutableSet()
         candidates.forEach { detected ->
-            val code = detected.code ?: detected.name ?: "D-${detected.id}"
-            try {
-                val desk = workplace.createDesk(
-                    DeskRequest(
-                        floorId = floorId,
-                        code = code,
-                        displayName = detected.name,
-                        x = scale(detected.bboxX), y = scale(detected.bboxY),
-                        width = scale(detected.bboxWidth).coerceAtLeast(MIN_DESK_SIZE),
-                        height = scale(detected.bboxHeight).coerceAtLeast(MIN_DESK_SIZE),
-                        rotation = detected.rotation
-                    )
-                )
-                detected.deskId = desk.id
-                objects.save(detected)
-                created += desk.id
-            } catch (ex: Exception) {
-                // A clashing desk code or an out-of-bounds region should not
-                // abandon the rest of the floor.
-                log.info("Skipped promoting detected object {}: {}", detected.id, ex.message)
+            val request = deskRequest(floorId, detected, taken)
+            if (request == null) {
+                log.info("Skipped promoting detected object {}: region has no usable size", detected.id)
                 skipped++
+                return@forEach
             }
+            taken += request.code.uppercase()
+            val desk = workplace.createDesk(request)
+            detected.deskId = desk.id
+            objects.save(detected)
+            created += desk.id
         }
         return DeskPromotionResponse(created.size, skipped, created)
     }
@@ -295,6 +287,52 @@ class FloorPlanDetectionService(
         entity.area = polygon.area
     }
 
+    /**
+     * Turns one detection into a desk the workplace layer will accept, or null
+     * if the region is unusable.
+     *
+     * Every check `createDesk` makes is satisfied here rather than being left
+     * to fail. A rejection thrown inside this transaction marks it
+     * rollback-only, and the loop cannot continue afterwards however carefully
+     * it catches: Hibernate refuses further flushes, every later candidate dies
+     * with "null id ... don't flush the Session after an exception occurs", and
+     * the commit fails with UnexpectedRollbackException. One bad region used to
+     * cost the entire floor and return a 500.
+     *
+     * Regions overhanging the plan edge are nudged inside instead of dropped —
+     * a detector placing a desk half off the sheet still found a real desk.
+     */
+    private fun deskRequest(floorId: Long, detected: DetectedObject, taken: Set<String>): DeskRequest? {
+        val width = scale(detected.bboxWidth).coerceIn(MIN_DESK_SIZE, FULL)
+        val height = scale(detected.bboxHeight).coerceIn(MIN_DESK_SIZE, FULL)
+        if (width <= BigDecimal.ZERO || height <= BigDecimal.ZERO) return null
+        return DeskRequest(
+            floorId = floorId,
+            code = uniqueCode(detected.code ?: detected.name ?: "D-${detected.id}", taken),
+            displayName = detected.name,
+            x = scale(detected.bboxX).coerceIn(BigDecimal.ZERO, FULL - width),
+            y = scale(detected.bboxY).coerceIn(BigDecimal.ZERO, FULL - height),
+            width = width,
+            height = height,
+            rotation = detected.rotation
+        )
+    }
+
+    /**
+     * A code no desk on this floor is using yet.
+     *
+     * Detection restarts its row lettering every scan, so promoting onto a
+     * floor that already holds desks clashes immediately. Suffixing keeps the
+     * recognisable code rather than dropping the desk.
+     */
+    private fun uniqueCode(base: String, taken: Set<String>): String {
+        val trimmed = base.trim().ifEmpty { "DESK" }
+        if (trimmed.uppercase() !in taken) return trimmed
+        var suffix = 2
+        while ("$trimmed-$suffix".uppercase() in taken) suffix++
+        return "$trimmed-$suffix"
+    }
+
     /** Detection space is 0..1; the interactive map's desks are 0..100. */
     private fun scale(value: Double): BigDecimal =
         BigDecimal(value * 100).setScale(4, RoundingMode.HALF_UP)
@@ -315,5 +353,7 @@ class FloorPlanDetectionService(
          */
         const val ROW_TOLERANCE = 0.012
         val MIN_DESK_SIZE: BigDecimal = BigDecimal("0.5")
+        /** The interactive map spans 0..100 on both axes. */
+        val FULL: BigDecimal = BigDecimal("100")
     }
 }

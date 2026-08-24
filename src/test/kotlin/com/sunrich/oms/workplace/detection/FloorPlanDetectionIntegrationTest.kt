@@ -23,6 +23,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.transaction.annotation.Transactional
+import java.math.BigDecimal
 
 /**
  * Exercises the pipeline against a stub engine. The detector seam is what makes
@@ -185,6 +186,38 @@ class FloorPlanDetectionIntegrationTest {
         val after = service.applyEdits(floorId, DetectionEditRequest(removedIds = listOf(drawn.single().id)))
 
         assertThat(after).isEmpty()
+    }
+
+    /**
+     * The production failure. Detection restarts its row lettering every scan,
+     * so a floor that already holds A01 collides on the first candidate. That
+     * clash used to be raised inside the shared promotion transaction, which
+     * marked it rollback-only; the catch walked past it, every later candidate
+     * then failed with "null id ... don't flush the Session after an exception
+     * occurs", and the commit was refused with UnexpectedRollbackException.
+     * The caller got a 500 and not one desk was created.
+     */
+    @Test
+    fun `a clashing code does not abandon the rest of the floor`() {
+        StubDetector.candidates = listOf(desk(0.1, 0.1), desk(0.3, 0.1), desk(0.5, 0.1))
+        service.detect(floorId)
+        // Take the code the first candidate is about to be given.
+        workplace.createDesk(
+            DeskRequest(
+                floorId = floorId, code = "A01",
+                x = BigDecimal("90"), y = BigDecimal("90"),
+                width = BigDecimal("2"), height = BigDecimal("2")
+            )
+        )
+
+        val result = service.promoteDesks(floorId)
+
+        // Every candidate lands; the clash is renamed rather than dropped.
+        assertThat(result.created).isEqualTo(3)
+        val codes = workplace.listDesks(floorId, false).map { it.code }
+        assertThat(codes).contains("A01", "A02", "A03")
+        assertThat(codes).hasSize(4)
+        assertThat(service.list(floorId).count { it.deskId != null }).isEqualTo(3)
     }
 
     @Test
