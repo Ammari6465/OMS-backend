@@ -105,6 +105,18 @@ class WorkplaceRulesTest{
   assertThatThrownBy{service.batch(floor,DeskBatchRequest(listOf(stray)))}.isInstanceOf(BadRequestException::class.java)
  }
 
+ @Test fun `batch recreates an archived desk code instead of violating the database constraint`(){
+  service.archive("desks",desk2)
+  val recreated=deskRequest("F3-028",55,30)
+
+  val saved=service.batch(floor,DeskBatchRequest(listOf(deskRequest("F3-027",10,10,zone),recreated)))
+
+  assertThat(saved.map{it.code}).containsExactly("F3-027","F3-028")
+  assertThat(saved.first{it.code=="F3-028"}.id).isEqualTo(desk2)
+  assertThat(saved.first{it.code=="F3-028"}.x).isEqualByComparingTo(BigDecimal("55"))
+  assertThat(desks.findById(desk2).orElseThrow().isDeleted).isFalse()
+ }
+
  @Test fun `clearing floor contents removes desks zones and all their assignments`(){
   val assignment=service.assign(AssignmentRequest(desk,staffId,LocalDate.now(clock),reason="Permanent desk"))
 

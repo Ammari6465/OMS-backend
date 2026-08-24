@@ -44,6 +44,8 @@ interface ZoneRepository:JpaRepository<Zone,Long>,JpaSpecificationExecutor<Zone>
 interface DeskRepository:JpaRepository<Desk,Long>,JpaSpecificationExecutor<Desk>{
  fun existsByFloor_IdAndCodeIgnoreCaseAndIsDeletedFalse(floorId:Long,code:String):Boolean
  fun existsByFloor_IdAndCodeIgnoreCaseAndIdNotAndIsDeletedFalse(floorId:Long,code:String,id:Long):Boolean
+ fun findFirstByFloor_IdAndCodeIgnoreCase(floorId:Long,code:String):Desk?
+ fun existsByFloor_IdAndCodeIgnoreCaseAndIdNot(floorId:Long,code:String,id:Long):Boolean
  fun findAllByFloor_IdAndIsDeletedFalseOrderByCode(id:Long):List<Desk>
  fun existsByFloor_IdAndIsDeletedFalse(id:Long):Boolean
  fun countByFloor_Building_Office_Company_IdInAndIsDeletedFalse(companyIds:Collection<Long>):Long
