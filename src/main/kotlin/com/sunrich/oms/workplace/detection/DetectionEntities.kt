@@ -117,7 +117,12 @@ class DetectedObject(
 
     /** Desk created from this detection, once promoted into the hierarchy. */
     @Column(name = "desk_id")
-    var deskId: Long? = null
+    var deskId: Long? = null,
+
+    /** Zone created from this room detection, once promoted. Keeps a re-run
+     *  from creating the same room twice. */
+    @Column(name = "zone_id")
+    var zoneId: Long? = null
 ) : BaseEntity() {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

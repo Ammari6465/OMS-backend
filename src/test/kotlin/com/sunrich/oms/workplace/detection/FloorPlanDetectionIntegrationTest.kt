@@ -221,6 +221,47 @@ class FloorPlanDetectionIntegrationTest {
     }
 
     @Test
+    fun `detected rooms are promoted into zones once, and a re-run adds nothing`() {
+        StubDetector.candidates = listOf(
+            room(DetectedObjectType.CABIN, "Director Cabin"),
+            room(DetectedObjectType.CONFERENCE_ROOM, "Board Room")
+        )
+        service.detect(floorId)
+
+        val first = service.promoteRooms(floorId)
+        val second = service.promoteRooms(floorId)
+
+        assertThat(first.created).isEqualTo(2)
+        // Idempotent: promoted rooms carry a zoneId and are not offered again.
+        assertThat(second.created).isZero()
+        val zones = workplace.listZones(floorId, false)
+        assertThat(zones.map { it.name }).containsExactlyInAnyOrder("Director Cabin", "Board Room")
+        assertThat(service.list(floorId).count { it.zoneId != null }).isEqualTo(2)
+    }
+
+    /**
+     * The production failure: promoting onto a floor that already holds a zone
+     * with the code detection would assign. It used to reject every room on the
+     * unique constraint and add none; now the clash is renamed and every new
+     * room lands.
+     */
+    @Test
+    fun `promoting rooms works even when a zone code already exists`() {
+        workplace.createZone(ZoneRequest(floorId, "Existing", "C1"))
+        StubDetector.candidates = listOf(
+            room(DetectedObjectType.CABIN, "Cabin One"),
+            room(DetectedObjectType.CABIN, "Cabin Two")
+        )
+        service.detect(floorId)
+
+        val result = service.promoteRooms(floorId)
+
+        assertThat(result.created).isEqualTo(2)
+        assertThat(result.skipped).isZero()
+        assertThat(workplace.listZones(floorId, false)).hasSize(3)
+    }
+
+    @Test
     fun `detected desks are promoted into real desks once`() {
         StubDetector.candidates = listOf(desk(0.1, 0.1), desk(0.3, 0.1))
         service.detect(floorId)

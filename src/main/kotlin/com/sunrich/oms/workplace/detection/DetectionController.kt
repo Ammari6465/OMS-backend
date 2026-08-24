@@ -67,4 +67,11 @@ class DetectionController(private val service: FloorPlanDetectionService) {
         val result = service.promoteDesks(floorId)
         return ApiResponse.ok(result, "Created ${result.created} desks from detected workstations")
     }
+
+    @PostMapping("/objects/promote-rooms")
+    @PreAuthorize(MANAGE)
+    fun promoteRooms(@PathVariable floorId: Long): ApiResponse<RoomPromotionResponse> {
+        val result = service.promoteRooms(floorId)
+        return ApiResponse.ok(result, "Created ${result.created} rooms from detected regions")
+    }
 }

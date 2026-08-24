@@ -5,6 +5,7 @@ import com.sunrich.oms.exception.BadRequestException
 import com.sunrich.oms.exception.ResourceNotFoundException
 import com.sunrich.oms.workplace.DeskRequest
 import com.sunrich.oms.workplace.WorkplaceService
+import com.sunrich.oms.workplace.ZoneRequest
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -213,6 +214,82 @@ class FloorPlanDetectionService(
     }
 
     /**
+     * Turns detected rooms into real Zone records, once each.
+     *
+     * Was previously done from the browser as one createZone call per room with
+     * a client-guessed code. Detection restarts its room numbering every scan,
+     * so those codes collided with zones an earlier run had already created, the
+     * unique constraint rejected every one, and "Create N rooms" reported N
+     * skipped and nothing added. Done here it is idempotent (a promoted room
+     * carries its zoneId and is not offered again) and codes are made unique
+     * against the floor before insert, so a re-run adds only the genuinely new
+     * rooms instead of failing wholesale.
+     */
+    @Transactional
+    fun promoteRooms(floorId: Long): RoomPromotionResponse {
+        workplace.requireManageableFloor(floorId)
+        val candidates = objects.findAllByFloor_IdAndIsDeletedFalseOrderByIdAsc(floorId)
+            .filter { it.type in ROOM_TYPES && it.zoneId == null }
+        val created = mutableListOf<Long>()
+        var skipped = 0
+        val taken = workplace.zoneCodes(floorId).toMutableSet()
+        candidates.forEach { detected ->
+            val name = detected.name?.trim()?.takeIf { it.isNotEmpty() }
+                ?: "${label(detected.type)} ${created.size + skipped + 1}"
+            val code = uniqueCode(detected.code ?: prefix(detected.type), taken)
+            taken += code.uppercase()
+            try {
+                val zone = workplace.createZone(
+                    ZoneRequest(floorId = floorId, name = name, code = code, colour = colour(detected.type))
+                )
+                detected.zoneId = zone.id
+                objects.save(detected)
+                created += zone.id
+            } catch (ex: Exception) {
+                // Reserving codes up front makes a clash unlikely, but a
+                // concurrent edit could still take one. Skip, do not abort.
+                log.info("Skipped promoting room {}: {}", detected.id, ex.message)
+                skipped++
+            }
+        }
+        return RoomPromotionResponse(created.size, skipped, created)
+    }
+
+    private val ROOM_TYPES = setOf(
+        DetectedObjectType.CABIN, DetectedObjectType.CONFERENCE_ROOM, DetectedObjectType.MEETING_ROOM,
+        DetectedObjectType.RECEPTION, DetectedObjectType.PANTRY, DetectedObjectType.WASHROOM,
+        DetectedObjectType.SERVER_ROOM, DetectedObjectType.STORAGE
+    )
+
+    private fun label(type: DetectedObjectType) = type.name.split('_')
+        .joinToString(" ") { it.lowercase().replaceFirstChar(Char::uppercase) }
+
+    private fun prefix(type: DetectedObjectType) = when (type) {
+        DetectedObjectType.CABIN -> "C"
+        DetectedObjectType.CONFERENCE_ROOM -> "CR"
+        DetectedObjectType.MEETING_ROOM -> "MR"
+        DetectedObjectType.RECEPTION -> "REC"
+        DetectedObjectType.PANTRY -> "PAN"
+        DetectedObjectType.WASHROOM -> "WR"
+        DetectedObjectType.SERVER_ROOM -> "SR"
+        DetectedObjectType.STORAGE -> "ST"
+        else -> "RM"
+    }
+
+    /** A muted colour per room type so the zone label reads on the map. */
+    private fun colour(type: DetectedObjectType) = when (type) {
+        DetectedObjectType.CABIN -> "#8b5cf6"
+        DetectedObjectType.CONFERENCE_ROOM -> "#0ea5e9"
+        DetectedObjectType.MEETING_ROOM -> "#06b6d4"
+        DetectedObjectType.RECEPTION -> "#f59e0b"
+        DetectedObjectType.PANTRY -> "#84cc16"
+        DetectedObjectType.WASHROOM -> "#14b8a6"
+        DetectedObjectType.SERVER_ROOM -> "#ef4444"
+        DetectedObjectType.STORAGE -> "#64748b"
+        else -> "#64748b"
+    }
+
+    /**
      * Assigns spatial codes: desks are grouped into rows by vertical position
      * and lettered top to bottom, then numbered left to right, so A01 sits
      * beside A02 on the plan rather than wherever the detector happened to
@@ -343,7 +420,7 @@ class FloorPlanDetectionService(
         bbox = BoundingBox(e.bboxX, e.bboxY, e.bboxWidth, e.bboxHeight),
         center = Point(e.centerX, e.centerY), rotation = e.rotation, area = e.area,
         confidence = e.confidence, ocrText = e.ocrText, source = e.source,
-        detector = e.detector, deskId = e.deskId, version = e.version
+        detector = e.detector, deskId = e.deskId, zoneId = e.zoneId, version = e.version
     )
 
     private companion object {
