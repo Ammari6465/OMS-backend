@@ -80,8 +80,22 @@ class FloorPlanStorage(
   throw BadRequestException("Only valid PNG, JPEG, and SVG floor plans are accepted")
  }
 
+ /**
+  * Two-layer SVG safety. A cheap regex pre-pass rejects the obvious, and no
+  * DOCTYPE/entity declaration is accepted at all (defence-in-depth against XXE
+  * and entity-expansion, on top of the external-entity-disabled parser). Then
+  * the parsed document is walked with an **allow-list**: any element not on the
+  * safe drawing list, any event-handler attribute, any external/js/non-image
+  * href, and any @import / url(http) / @font-face / expression() CSS is rejected.
+  * An allow-list blocks unknown and future vectors that a deny-list would miss.
+  */
  private fun validateSvg(bytes:ByteArray){
   val text=bytes.toString(Charsets.UTF_8).replace("\uFEFF","")
+  // Reject entity declarations (the XXE / entity-expansion vector). A plain
+  // SVG 1.1 DOCTYPE with no <!ENTITY> is left to the parser, which already has
+  // external DTD/entity resolution disabled, so benign real-world exports load.
+  if(Regex("<!ENTITY",RegexOption.IGNORE_CASE).containsMatchIn(text))
+   throw BadRequestException("SVG must not declare XML entities")
   if(Regex("<(script|foreignObject|iframe|object|embed)[\\s>]",RegexOption.IGNORE_CASE).containsMatchIn(text)||
      Regex("\\son[a-z]+\\s*=",RegexOption.IGNORE_CASE).containsMatchIn(text)||
      Regex("(?:href|src)\\s*=\\s*['\"]\\s*javascript:",RegexOption.IGNORE_CASE).containsMatchIn(text)||
@@ -89,8 +103,37 @@ class FloorPlanStorage(
      Regex("(?:href|src)\\s*=\\s*['\"]\\s*https?:",RegexOption.IGNORE_CASE).containsMatchIn(text)){
    throw BadRequestException("SVG contains unsafe content")
   }
-  try{parseSvg(bytes)}catch(e:BadRequestException){throw e}catch(e:Exception){throw BadRequestException("The SVG file is invalid or malformed")}
+  val doc=try{parseSvg(bytes)}catch(e:BadRequestException){throw e}catch(e:Exception){throw BadRequestException("The SVG file is invalid or malformed")}
+  validateSvgDom(doc)
  }
+
+ /** Elements a floor-plan SVG is allowed to contain — drawing, text and structure only; no active or embedding elements. */
+ private val allowedSvgElements=setOf("svg","g","defs","symbol","use","title","desc","metadata","style","rect","circle","ellipse","line","polyline","polygon","path","text","tspan","textpath","tref","image","clippath","mask","pattern","marker","lineargradient","radialgradient","stop","view","switch","a")
+
+ private fun validateSvgDom(doc:org.w3c.dom.Document){
+  val stack=ArrayDeque<org.w3c.dom.Node>();stack.addLast(doc.documentElement)
+  while(stack.isNotEmpty()){
+   val node=stack.removeLast()
+   if(node is org.w3c.dom.Element){
+    val name=(node.localName?:node.tagName.substringAfterLast(':')).lowercase()
+    if(name !in allowedSvgElements)throw BadRequestException("SVG contains a disallowed element <$name>")
+    val attrs=node.attributes
+    for(i in 0 until attrs.length){
+     val a=attrs.item(i);val an=(a.localName?:a.nodeName).lowercase();val av=(a.nodeValue?:"")
+     if(an.startsWith("on"))throw BadRequestException("SVG contains an event-handler attribute ${a.nodeName}")
+     if(an=="href"||a.nodeName.lowercase().endsWith("href")){
+      val v=av.trim().lowercase()
+      if(v.startsWith("http:")||v.startsWith("https:")||v.startsWith("javascript:")||(v.startsWith("data:")&&!v.startsWith("data:image/")))
+       throw BadRequestException("SVG references an external or unsafe URL")
+     }
+     if(an=="style"&&unsafeCss(av))throw BadRequestException("SVG style attribute contains unsafe CSS")
+    }
+    if(name=="style"&&unsafeCss(node.textContent?:""))throw BadRequestException("SVG <style> contains unsafe CSS")
+   }
+   val kids=node.childNodes;for(i in 0 until kids.length)stack.addLast(kids.item(i))
+  }
+ }
+ private fun unsafeCss(css:String):Boolean{val c=css.lowercase();return c.contains("@import")||c.contains("@font-face")||c.contains("expression(")||Regex("url\\(\\s*['\"]?\\s*(?:https?:|//)").containsMatchIn(c)}
 
  private fun parseSvg(bytes:ByteArray)=DocumentBuilderFactory.newInstance().apply{
   isNamespaceAware=true

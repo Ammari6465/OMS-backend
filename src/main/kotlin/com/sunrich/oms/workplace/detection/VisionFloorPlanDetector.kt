@@ -58,6 +58,10 @@ class VisionFloorPlanDetector(
 ) : FloorPlanDetector {
 
     private val log = LoggerFactory.getLogger(javaClass)
+    // The connection and response timeouts are applied to the builder by
+    // DetectionConfig (production wiring). They are set there rather than here so
+    // tests can bind a MockRestServiceServer to the builder without this class
+    // overriding its request factory.
     private val client = restClientBuilder.baseUrl(props.baseUrl).build()
 
     override val name = "vision:${props.model}"
@@ -69,7 +73,15 @@ class VisionFloorPlanDetector(
     override fun supports(image: PlanImage) =
         available && SUPPORTED_IMAGE_TYPES.contains(image.mediaType)
 
-    override fun detect(image: PlanImage): List<DetectionCandidate> {
+    override fun detect(image: PlanImage): List<DetectionCandidate> = detect(image, props.preprocess)
+
+    /**
+     * Detects with an explicit [preprocess] flag instead of reading the shared
+     * [DetectionProperties.preprocess]. A retry that wants preprocessing off must
+     * pass `false` here rather than mutating the singleton bean, which would flip
+     * the flag for every concurrent scan.
+     */
+    fun detect(image: PlanImage, preprocess: Boolean): List<DetectionCandidate> {
         if (!available) return emptyList()
         if (!SUPPORTED_IMAGE_TYPES.contains(image.mediaType)) {
             // PDFs and SVGs need rasterising before a vision model can read them.
@@ -83,7 +95,7 @@ class VisionFloorPlanDetector(
         // A plan the server rendered is already clean line art at the right
         // size; preprocessing it again buys nothing and costs several full-size
         // buffers, which is fatal on a container with little headroom.
-        val prepared = if (props.preprocess && !image.prepared) preprocessor.clean(image) else null
+        val prepared = if (preprocess && !image.prepared) preprocessor.clean(image) else null
         return try {
             val visionImage = prepared?.image ?: image
             val content = request(visionImage, PROMPT)

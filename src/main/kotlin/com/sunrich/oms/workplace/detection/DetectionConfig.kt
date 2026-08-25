@@ -29,7 +29,16 @@ class DetectionConfig {
         val heuristic = HeuristicSvgFloorPlanDetector()
         val rasterizer = SvgRasterizer()
         val vision = if (props.provider.equals("vision", ignoreCase = true) && props.apiKey.isNotBlank()) {
-            VisionFloorPlanDetector(props, restClientBuilder, mapper)
+            // Apply the configured provider timeout as both a connection and a
+            // response (read) timeout on a cloned builder, so a hung vision
+            // endpoint fails fast instead of holding the scan open indefinitely.
+            val timedBuilder = restClientBuilder.clone().requestFactory(
+                org.springframework.http.client.SimpleClientHttpRequestFactory().apply {
+                    setConnectTimeout(java.time.Duration.ofSeconds(props.timeoutSeconds.coerceIn(1, 30)))
+                    setReadTimeout(java.time.Duration.ofSeconds(props.timeoutSeconds.coerceAtLeast(1)))
+                }
+            )
+            VisionFloorPlanDetector(props, timedBuilder, mapper)
         } else null
 
         return object : FloorPlanDetector {
@@ -78,22 +87,16 @@ class DetectionConfig {
                 if (result.size >= MIN_OBJECTS) return result
 
                 // Too few objects — the preprocessor may have been too aggressive
-                // or the response was truncated. Retry with the original image if
-                // preprocessing was active (the VisionFloorPlanDetector preprocesses
-                // internally, so we force a retry by temporarily disabling it).
+                // or the response was truncated. Retry with preprocessing off, but
+                // as a request-local flag: mutating the shared props.preprocess here
+                // would flip preprocessing off for every concurrent scan mid-flight.
                 if (props.preprocess && result.size < MIN_OBJECTS) {
                     log.info(
                         "Vision detector returned only {} objects; retrying with preprocessing disabled",
                         result.size
                     )
-                    val savedPreprocess = props.preprocess
-                    try {
-                        props.preprocess = false
-                        val retry = vision.detect(forVision)
-                        if (retry.size > result.size) return retry
-                    } finally {
-                        props.preprocess = savedPreprocess
-                    }
+                    val retry = vision.detect(forVision, preprocess = false)
+                    if (retry.size > result.size) return retry
                 }
                 return result
             }

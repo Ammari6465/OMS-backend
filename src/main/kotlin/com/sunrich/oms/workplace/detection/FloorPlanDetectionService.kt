@@ -2,6 +2,7 @@ package com.sunrich.oms.workplace.detection
 
 import com.sunrich.oms.common.enums.AuditAction
 import com.sunrich.oms.exception.BadRequestException
+import com.sunrich.oms.exception.ConflictException
 import com.sunrich.oms.exception.ResourceNotFoundException
 import com.sunrich.oms.workplace.DeskRequest
 import com.sunrich.oms.workplace.SpaceRequest
@@ -56,12 +57,21 @@ class FloorPlanDetectionService(
      * replaced; anything a person drew or corrected is preserved, because the
      * point of the edit surface is that corrections stick.
      */
+    /** Floors with a scan in flight, so two simultaneous scans of one floor cannot both run and duplicate its objects. */
+    private val scanning = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+
     @Transactional
-    fun detect(floorId: Long): DetectionRunResponse = detect(floorId, preserveHumanEdits = true)
+    fun detect(floorId: Long): DetectionRunResponse = withScanGuard(floorId) { detect(floorId, preserveHumanEdits = true) }
 
     /** A clean scan intentionally discards manual/edited recognition overlays too. */
     @Transactional
-    fun rescan(floorId: Long): DetectionRunResponse = detect(floorId, preserveHumanEdits = false)
+    fun rescan(floorId: Long): DetectionRunResponse = withScanGuard(floorId) { detect(floorId, preserveHumanEdits = false) }
+
+    /** Rejects a second concurrent scan of the same floor rather than letting both run and duplicate detections. */
+    private fun <T> withScanGuard(floorId: Long, block: () -> T): T {
+        if (!scanning.add(floorId)) throw ConflictException("A scan is already running for this floor; wait for it to finish")
+        return try { block() } finally { scanning.remove(floorId) }
+    }
 
     private fun detect(floorId: Long, preserveHumanEdits: Boolean): DetectionRunResponse {
         val floor = workplace.requireManageableFloor(floorId)

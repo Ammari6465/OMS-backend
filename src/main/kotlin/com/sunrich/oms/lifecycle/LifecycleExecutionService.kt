@@ -20,7 +20,9 @@ class LifecycleExecutionService(
     private val staff: StaffRepository, private val companies: CompanyRepository, private val departments: DepartmentRepository,
     private val positions: PositionRepository, private val users: UserRepository, private val encoder: PasswordEncoder,
     private val mapper: ObjectMapper, private val clock: Clock, private val audit: AuditTrailService,
-    private val workplaces: WorkplaceService
+    private val workplaces: WorkplaceService,
+    private val deskBookings: com.sunrich.oms.workplace.BookingService,
+    private val roomBookings: com.sunrich.oms.workplace.RoomBookingService
 ) {
     @Transactional
     fun execute(id: Long): LifecycleWorkflow {
@@ -59,6 +61,10 @@ class LifecycleExecutionService(
         steps += "position disposition applied"
         workplaces.releaseForStaff(person.id!!, w.effectiveDate, "Staff exit via ${w.workflowNumber}")
         steps += "workplace assignment released"
+        // Cancel the leaver's future desk and meeting-room bookings so they do not hold space after they have gone.
+        val cancelledDesk = deskBookings.cancelUpcomingForStaff(person.id!!, w.effectiveDate, "Staff exit via ${w.workflowNumber}")
+        val cancelledRoom = roomBookings.cancelUpcomingForStaff(person.id!!, w.effectiveDate, "Staff exit via ${w.workflowNumber}")
+        if (cancelledDesk + cancelledRoom > 0) steps += "cancelled $cancelledDesk desk and $cancelledRoom room bookings"
         person.status = EntityStatus.INACTIVE; person.dateLeft = w.effectiveDate; staff.save(person); steps += "staff deactivated"
         users.findFirstByStaffIdAndIsDeletedFalse(person.id!!)?.let {
             it.isActive = false; it.status = EntityStatus.INACTIVE; it.passwordResetToken = null; it.passwordResetExpires = null
