@@ -11,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.test.annotation.DirtiesContext
 import org.springframework.test.context.ActiveProfiles
 import java.math.BigDecimal
 import java.time.Clock
@@ -24,6 +25,7 @@ import java.util.concurrent.*
  * them. If the lock did nothing, both would insert and the assertion would fail.
  */
 @SpringBootTest @ActiveProfiles("test")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class BookingConcurrencyTest {
  @Autowired lateinit var service: BookingService
  @Autowired lateinit var workplace: WorkplaceService

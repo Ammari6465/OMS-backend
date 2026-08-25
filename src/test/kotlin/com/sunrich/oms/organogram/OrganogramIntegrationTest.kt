@@ -3,6 +3,7 @@ package com.sunrich.oms.organogram
 import com.sunrich.oms.common.enums.AuditAction
 import com.sunrich.oms.common.enums.EntityStatus
 import com.sunrich.oms.common.enums.Role
+import com.sunrich.oms.common.enums.PositionStatus
 import com.sunrich.oms.exception.BadRequestException
 import com.sunrich.oms.exception.ConflictException
 import com.sunrich.oms.exception.ForbiddenException
@@ -34,6 +35,9 @@ class OrganogramIntegrationTest {
     @Autowired lateinit var departmentService: DepartmentService
     @Autowired lateinit var staffService: StaffService
     @Autowired lateinit var users: UserRepository
+    @Autowired lateinit var companies: CompanyRepository
+    @Autowired lateinit var departments: DepartmentRepository
+    @Autowired lateinit var positions: PositionRepository
     @Autowired lateinit var audits: AuditLogRepository
     @Autowired lateinit var sse: OrganogramSseController
 
@@ -117,6 +121,34 @@ class OrganogramIntegrationTest {
         authenticate(555, Role.MANAGER, companyA.id)
         assertThatThrownBy { organogram.changeManager(child.id, ManagerChangeRequest(null, child.version)) }
             .isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
+    fun `position view includes open vacancies only when requested`() {
+        authenticate(999, Role.SUPER_ADMIN, null)
+        val company = companies.findById(companyA.id).orElseThrow()
+        val department = departments.findById(departmentA.id).orElseThrow()
+        val root = positions.save(Position(company, "Chief Executive", department, isVacant = true, status = PositionStatus.OPEN))
+        val child = positions.save(Position(company, "Engineer", department, root, isVacant = true, status = PositionStatus.OPEN))
+        positions.save(Position(company, "Closed Role", department, root, isVacant = true, status = PositionStatus.CLOSED))
+
+        val included = organogram.get(companyA.id, OrganogramView.POSITION, true)
+        assertThat(included.nodes.map { it.id }).contains(root.id, child.id).doesNotContainNull()
+        assertThat(included.vacancies.map { it.id }).containsExactlyInAnyOrder(root.id, child.id)
+        val excluded = organogram.get(companyA.id, OrganogramView.POSITION, false)
+        assertThat(excluded.nodes).isEmpty()
+        assertThat(excluded.vacancies).isEmpty()
+    }
+
+    @Test
+    fun `staff details expose contact fields only to permitted roles`() {
+        authenticate(999, Role.SUPER_ADMIN, null)
+        val person = create(companyA.id, departmentA.id, "CONTACT", "Contact Person", email = "contact@example.com")
+
+        authenticate(700, Role.STAFF, companyA.id)
+        assertThat(organogram.staffDetails(person.id).email).isNull()
+        authenticate(701, Role.MANAGER, companyA.id)
+        assertThat(organogram.staffDetails(person.id).email).isEqualTo("contact@example.com")
     }
 
     private fun create(companyId: Long, deptId: Long, code: String, name: String, managerId: Long? = null,

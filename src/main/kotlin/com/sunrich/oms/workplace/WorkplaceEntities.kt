@@ -126,3 +126,19 @@ class DeskAssignment(
  @ManyToOne(fetch=FetchType.LAZY) @JoinColumn(name="released_by") var releasedBy:User?=null
  @Column(name="release_reason",length=1000) var releaseReason:String?=null
 }
+
+/** Permanent occupation of a cabin. Kept separate from desk assignments and room bookings. */
+@Entity @Table(name="workplace_space_assignments",indexes=[Index(name="idx_workplace_space_assignment_staff",columnList="staff_id,effective_from,effective_to"),Index(name="idx_workplace_space_assignment_space",columnList="space_id,effective_from,effective_to")])
+class SpaceAssignment(
+ @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(name="space_id",nullable=false) var space:WorkplaceSpace,
+ @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(name="staff_id",nullable=false) var staff:Staff,
+ @Column(name="effective_from",nullable=false) var effectiveFrom:LocalDate,
+ @Column(name="effective_to") var effectiveTo:LocalDate?=null,
+ @Column(name="is_primary",nullable=false) var primaryAssignment:Boolean=true,
+ @Column(name="assignment_reason",length=1000) var assignmentReason:String?=null,
+ @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(name="assigned_by",nullable=false) var assignedBy:User
+):BaseEntity(){
+ @Id @GeneratedValue(strategy=GenerationType.IDENTITY) @Column(name="space_assignment_id") var id:Long?=null
+ @ManyToOne(fetch=FetchType.LAZY) @JoinColumn(name="released_by") var releasedBy:User?=null
+ @Column(name="release_reason",length=1000) var releaseReason:String?=null
+}

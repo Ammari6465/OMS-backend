@@ -36,6 +36,7 @@ data class DeskBatchItem(
  */
 data class DeskBatchRequest(val desks:List<DeskBatchItem> = emptyList(),val removedDeskIds:List<Long> = emptyList(),val mapRevision:Long?=null)
 data class AssignmentRequest(val deskId:Long,val staffId:Long,val effectiveFrom:LocalDate,val effectiveTo:LocalDate?=null,val primaryAssignment:Boolean=true,val reason:String?=null)
+data class SpaceAssignmentRequest(val spaceId:Long,val staffId:Long,val effectiveFrom:LocalDate,val effectiveTo:LocalDate?=null,val primaryAssignment:Boolean=true,val reason:String?=null)
 data class TransferRequest(val targetDeskId:Long,val effectiveDate:LocalDate,val reason:String?=null)
 data class ReleaseRequest(val effectiveTo:LocalDate,val reason:String?=null,val version:Long)
 data class OfficeResponse(val id:Long,val version:Long,val companyId:Long,val companyName:String,val name:String,val code:String,val address:String?,val city:String?,val country:String?,val timeZone:String,val status:EntityStatus,val isDeleted:Boolean)
@@ -43,6 +44,7 @@ data class BuildingResponse(val id:Long,val version:Long,val officeId:Long,val o
 data class FloorResponse(val id:Long,val version:Long,val buildingId:Long,val buildingName:String,val officeId:Long,val officeName:String,val companyId:Long,val companyName:String,val name:String,val displayOrder:Int,val hasPlan:Boolean,val planOriginalName:String?,val planMediaType:String?,val planWidth:Int?,val planHeight:Int?,val mapRevision:Long,val status:EntityStatus,val isDeleted:Boolean)
 data class ZoneResponse(val id:Long,val version:Long,val floorId:Long,val name:String,val code:String,val colour:String,val description:String?,val status:EntityStatus,val isDeleted:Boolean)
 data class AssignmentResponse(val id:Long,val version:Long,val deskId:Long,val deskCode:String,val floorId:Long,val floorName:String,val buildingName:String,val officeName:String,val zoneName:String?,val telephoneExtension:String?,val staffId:Long,val staffName:String?,val employeeCode:String?,val departmentId:Long?,val departmentName:String?,val positionTitle:String?,val effectiveFrom:LocalDate,val effectiveTo:LocalDate?,val primaryAssignment:Boolean,val reason:String?,val releaseReason:String?)
+data class SpaceAssignmentResponse(val id:Long,val version:Long,val spaceId:Long,val spaceCode:String,val spaceName:String,val floorId:Long,val floorName:String,val buildingName:String,val officeName:String,val staffId:Long,val staffName:String?,val employeeCode:String?,val departmentId:Long?,val departmentName:String?,val positionTitle:String?,val effectiveFrom:LocalDate,val effectiveTo:LocalDate?,val primaryAssignment:Boolean,val reason:String?,val releaseReason:String?)
 data class DeskResponse(val id:Long,val version:Long,val floorId:Long,val zoneId:Long?,val zoneName:String?,val spaceId:Long?,val spaceName:String?,val code:String,val displayName:String?,val mode:DeskMode,val availability:DeskAvailability,val x:BigDecimal,val y:BigDecimal,val width:BigDecimal,val height:BigDecimal,val rotation:Int,val capacity:Int,val telephoneExtension:String?,val accessible:Boolean,val equipmentTags:String?,val notes:String?,val status:EntityStatus,val isDeleted:Boolean,val assignment:AssignmentResponse?=null)
 data class FloorMapResponse(val floor:FloorResponse,val planUrl:String?,val zones:List<ZoneResponse>,val spaces:List<SpaceResponse>,val desks:List<DeskResponse>)
 data class PlanPoint(val x:Double,val y:Double)
@@ -59,7 +61,7 @@ data class SpaceRequest(
 data class SpaceResponse(
  val id:Long,val version:Long,val floorId:Long,val zoneId:Long?,val zoneName:String?,val type:SpaceType,val name:String,val code:String,
  val polygon:List<PlanPoint>,val bbox:SpaceBox,val rotation:Int,val capacity:Int?,val colour:String,val bookable:Boolean,val accessible:Boolean,
- val departmentId:Long?,val departmentName:String?,val amenities:String?,val equipmentTags:String?,val notes:String?,val deskCount:Int,val status:EntityStatus,val isDeleted:Boolean
+ val departmentId:Long?,val departmentName:String?,val amenities:String?,val equipmentTags:String?,val notes:String?,val deskCount:Int,val status:EntityStatus,val isDeleted:Boolean,val assignment:SpaceAssignmentResponse?=null
 )
 data class FloorContentsClearResult(val desks:Int,val zones:Int,val assignments:Int)
 data class WorkplaceSummary(val totalDesks:Long,val assignedDesks:Long,val availableDesks:Long,val unavailableDesks:Long,val staffWithoutDesks:Long,val utilizationPercent:Double)

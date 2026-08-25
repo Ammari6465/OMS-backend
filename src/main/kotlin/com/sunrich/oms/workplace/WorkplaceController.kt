@@ -44,6 +44,8 @@ class WorkplaceController(private val service:WorkplaceService){
  @PostMapping("/assignments") @PreAuthorize(MANAGE) fun assign(@Valid @RequestBody r:AssignmentRequest)=ApiResponse.ok(service.assign(r),"Desk assigned")
  @PostMapping("/assignments/{id}/transfer") @PreAuthorize(MANAGE) fun transfer(@PathVariable id:Long,@Valid @RequestBody r:TransferRequest)=ApiResponse.ok(service.transfer(id,r),"Desk transferred")
  @PostMapping("/assignments/{id}/release") @PreAuthorize(MANAGE) fun release(@PathVariable id:Long,@Valid @RequestBody r:ReleaseRequest)=ApiResponse.ok(service.release(id,r),"Desk released")
+ @PostMapping("/space-assignments") @PreAuthorize(MANAGE) fun assignSpace(@Valid @RequestBody r:SpaceAssignmentRequest)=ApiResponse.ok(service.assignSpace(r),"Cabin assigned")
+ @PostMapping("/space-assignments/{id}/release") @PreAuthorize(MANAGE) fun releaseSpace(@PathVariable id:Long,@Valid @RequestBody r:ReleaseRequest)=ApiResponse.ok(service.releaseSpace(id,r),"Cabin released")
  @GetMapping("/assignments/staff/{staffId}/current") fun current(@PathVariable staffId:Long)=ApiResponse.ok(service.currentForStaff(staffId))
  @GetMapping("/assignments/staff/{staffId}/history") fun history(@PathVariable staffId:Long)=ApiResponse.ok(service.history(staffId))
  @GetMapping("/summary") fun summary(@RequestParam(required=false)companyId:Long?)=ApiResponse.ok(service.summary(companyId))
